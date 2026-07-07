@@ -1,0 +1,10 @@
+[package]
+name = "pinocchio-rs"
+version = "4.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+description = "Clean-room Rust bindings for the Pinocchio rigid-body dynamics library. Crate version tracks the bound Pinocchio version (4.1.0)."
+repository = "https://github.com/AstroRoboticsTech/pinocchio-rs"
+readme = "README.md"
+
+[dependencies]
