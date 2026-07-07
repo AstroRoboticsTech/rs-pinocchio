@@ -24,3 +24,7 @@ pkg-config = "0.3"
 default = []
 # Emit tracing spans/events from the safe wrapper.
 trace = ["dep:tracing"]
+
+[package.metadata.docs.rs]
+# build.rs skips the native step when DOCS_RS is set, so docs build without Pinocchio.
+all-features = true

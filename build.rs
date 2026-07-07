@@ -14,6 +14,12 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // docs.rs has no Pinocchio install: skip the native probe + C++ compile so
+    // `cargo doc` (which never links) still builds the Rust API docs.
+    if std::env::var_os("DOCS_RS").is_some() {
+        return;
+    }
+
     println!("cargo:rerun-if-changed=cpp/pinocchio_shim.cpp");
     println!("cargo:rerun-if-changed=cpp/pinocchio_shim.h");
     println!("cargo:rerun-if-changed=src/ffi.rs");
