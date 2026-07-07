@@ -7,7 +7,7 @@
 //!
 //! ```no_run
 //! use nalgebra::DVector;
-//! use pinocchio_rs::{Model, ReferenceFrame};
+//! use rs_pinocchio::{Model, ReferenceFrame};
 //!
 //! let mut model = Model::from_urdf("robot.urdf", /* floating_base = */ false)?;
 //! let q = DVector::zeros(model.nq());
@@ -19,7 +19,7 @@
 //!
 //! model.compute_joint_jacobians(&q)?;
 //! let jac = model.frame_jacobian(tip, ReferenceFrame::LocalWorldAligned)?; // 6 x nv
-//! # Ok::<(), pinocchio_rs::Error>(())
+//! # Ok::<(), rs_pinocchio::Error>(())
 //! ```
 //!
 //! [Pinocchio]: https://github.com/stack-of-tasks/pinocchio

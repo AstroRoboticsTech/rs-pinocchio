@@ -23,9 +23,9 @@
 #include <string>
 #include <utility>
 
-#include "pinocchio-rs/cpp/pinocchio_shim.h"
+#include "rs-pinocchio/cpp/pinocchio_shim.h"
 // Full definition of the cxx shared struct (FramePlacement).
-#include "pinocchio-rs/src/ffi.rs.h"
+#include "rs-pinocchio/src/ffi.rs.h"
 
 namespace pinocchio_shim {
 

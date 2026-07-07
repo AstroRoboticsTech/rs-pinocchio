@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use nalgebra::DVector;
-use pinocchio_rs::{Model, ReferenceFrame};
+use rs_pinocchio::{Model, ReferenceFrame};
 
 /// A minimal two-revolute-joint arm: base_link -> link1 -> tool.
 /// nq = nv = 2. Frame `tool` is the end-effector.

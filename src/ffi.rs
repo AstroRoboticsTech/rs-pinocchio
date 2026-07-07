@@ -15,7 +15,7 @@ pub(crate) mod bridge {
     }
 
     unsafe extern "C++" {
-        include!("pinocchio-rs/cpp/pinocchio_shim.h");
+        include!("rs-pinocchio/cpp/pinocchio_shim.h");
 
         /// Opaque handle bundling a Pinocchio `Model` + `Data`.
         type PinocchioModel;

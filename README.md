@@ -1,4 +1,4 @@
-# pinocchio-rs
+# rs-pinocchio
 
 Clean-room Rust bindings for the [Pinocchio](https://github.com/stack-of-tasks/pinocchio)
 rigid-body dynamics library, via [cxx](https://cxx.rs). Built for whole-body IK
@@ -12,7 +12,7 @@ code from any other Rust binding was consulted or copied.
 ## Versioning
 
 The crate version **tracks the bound Pinocchio version** for convenience — e.g.
-`pinocchio-rs = "4.1.x"` binds Pinocchio `4.1.0`. Bump the crate minor/patch to
+`rs-pinocchio = "4.1.x"` binds Pinocchio `4.1.0`. Bump the crate minor/patch to
 follow Pinocchio releases. (The FK / frame-Jacobian API is stable across the
 4.0/4.1 series, so the crate also links and runs against Pinocchio 4.0.x.)
 
@@ -33,7 +33,7 @@ Everything returns [`nalgebra`](https://nalgebra.org) types.
 
 ```rust
 use nalgebra::DVector;
-use pinocchio_rs::{Model, ReferenceFrame};
+use rs_pinocchio::{Model, ReferenceFrame};
 
 // Build (floating_base = true prepends a free-flyer root: +7 nq, +6 nv).
 let mut model = Model::from_urdf("robot.urdf", false)?;
@@ -51,7 +51,7 @@ let pose = model.frame_placement(tip)?;                     // -> Isometry3<f64>
 model.compute_joint_jacobians(&q)?;
 let j = model.frame_jacobian(tip, ReferenceFrame::LocalWorldAligned)?;
 assert_eq!((j.nrows(), j.ncols()), (6, nv));
-# Ok::<(), pinocchio_rs::Error>(())
+# Ok::<(), rs_pinocchio::Error>(())
 ```
 
 Convenience by-name variants (`frame_placement_by_name`,
@@ -109,4 +109,4 @@ explicitly once it is installed:
 cargo test -- --ignored
 ```
 
-Licensed BSD-2-Clause. Not affiliated with any other `pinocchio-rs` crate.
+Licensed BSD-2-Clause. Not affiliated with the `pinocchio` or `pinocchio_rs` crates.

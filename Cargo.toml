@@ -1,10 +1,12 @@
 [package]
-name = "pinocchio-rs"
+name = "rs-pinocchio"
 version = "4.1.0"
 edition = "2021"
 license = "BSD-2-Clause"
-description = "Clean-room Rust bindings for the Pinocchio rigid-body dynamics library. Crate version tracks the bound Pinocchio version (4.1.0)."
-repository = "https://github.com/AstroRoboticsTech/pinocchio-rs"
+description = "Clean-room Rust bindings (cxx) for the Pinocchio rigid-body dynamics library — forward kinematics + frame Jacobians. Crate version tracks the bound Pinocchio version (4.1.0)."
+repository = "https://github.com/AstroRoboticsTech/rs-pinocchio"
+keywords = ["pinocchio", "robotics", "kinematics", "jacobian", "ffi"]
+categories = ["science::robotics", "api-bindings"]
 readme = "README.md"
 links = "pinocchio_shim"
 
