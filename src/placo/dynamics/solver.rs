@@ -57,8 +57,16 @@ pub struct DynamicsSolver {
     pub damping: f64,
     /// Weight of the actuated-torque minimization.
     pub torque_cost: f64,
-    /// Integration timestep (for `solve(integrate = true)`).
+    /// Integration timestep (for `solve(integrate = true)`, and the limits).
     pub dt: f64,
+    /// Enforce actuated torque limits (from the URDF effort limits).
+    pub torque_limits: bool,
+    /// Enforce joint velocity limits (needs `dt`).
+    pub velocity_limits: bool,
+    /// Enforce joint position limits (needs `dt`).
+    pub joint_limits: bool,
+    /// Safe deceleration used by the position limits [rad/s²].
+    pub qdd_safe: f64,
 }
 
 impl DynamicsSolver {
@@ -74,7 +82,63 @@ impl DynamicsSolver {
             damping: 0.0,
             torque_cost: 1e-3,
             dt: 0.0,
+            torque_limits: false,
+            velocity_limits: false,
+            joint_limits: false,
+            qdd_safe: 1.0,
         }
+    }
+
+    fn add_limits(
+        &self,
+        problem: &mut Problem,
+        qdd: crate::placo::problem::Variable,
+        tau: &Expression,
+        robot: &RobotWrapper,
+    ) -> Result<()> {
+        let count = self.n - 6;
+        if (self.velocity_limits || self.joint_limits) && self.dt == 0.0 {
+            return Err(Error::Solver("dynamics limits enabled but dt is 0".into()));
+        }
+
+        if self.torque_limits {
+            let effort = robot.effort_limits().rows(6, count).into_owned();
+            problem.add_constraint(tau.slice(6, count).leq_vector(effort.clone()));
+            problem.add_constraint(tau.slice(6, count).geq_vector(-effort));
+        }
+
+        if self.velocity_limits {
+            let vlim = robot.velocity_limits().rows(6, count).into_owned();
+            let qd_bottom = robot.state.qd.rows(6, count).into_owned();
+            let e = qdd
+                .expr_slice(6, count)
+                .scale(self.dt)
+                .add_vector(&qd_bottom);
+            problem.add_constraint(e.leq_vector(vlim.clone()));
+            problem.add_constraint(e.geq_vector(-vlim));
+        }
+
+        if self.joint_limits {
+            let (lower, upper) = robot.position_limits();
+            let qd_bottom = robot.state.qd.rows(6, count).into_owned();
+            let mut qd_max_up = DVector::zeros(count);
+            let mut qd_max_lo = DVector::zeros(count);
+            for k in 0..count {
+                // q index = v index + 1 for the actuated (single-DoF) joints.
+                let q = robot.state.q[k + 7];
+                let du = (upper[k + 7] - q).clamp(0.0, 1e6);
+                let dl = (q - lower[k + 7]).clamp(0.0, 1e6);
+                qd_max_up[k] = (2.0 * du * self.qdd_safe).sqrt();
+                qd_max_lo[k] = (2.0 * dl * self.qdd_safe).sqrt();
+            }
+            let e = qdd
+                .expr_slice(6, count)
+                .scale(self.dt)
+                .add_vector(&qd_bottom);
+            problem.add_constraint(e.leq_vector(qd_max_up));
+            problem.add_constraint(e.geq_vector(-qd_max_lo));
+        }
+        Ok(())
     }
 
     fn push_task(&mut self, task: Box<dyn DynamicsTask>) -> TaskId {
@@ -257,6 +321,9 @@ impl DynamicsSolver {
         for (ci, fvar) in &contact_fvars {
             self.contacts[*ci].add_constraints(&mut problem, *fvar);
         }
+
+        // Torque / velocity / joint limits.
+        self.add_limits(&mut problem, qdd, &tau, robot)?;
 
         // Floating base has no actuation (unless masked).
         if !self.masked_fbase {
