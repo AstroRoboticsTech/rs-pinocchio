@@ -245,3 +245,42 @@ impl Contact for ExternalWrenchContact {
         problem.add_constraint(f.expr().equal_vector(self.w_ext.clone()));
     }
 }
+
+/// A "puppet" contact applying an unconstrained generalized force on every DoF
+/// (identity Jacobian) (PlaCo `PuppetContact`). Useful to fully actuate a robot
+/// (e.g. for testing or a floating puppet).
+pub struct PuppetContact {
+    /// Whether this contact is active.
+    pub active: bool,
+    j: DMatrix<f64>,
+}
+
+impl PuppetContact {
+    pub(crate) fn new() -> Self {
+        Self {
+            active: true,
+            j: DMatrix::zeros(0, 0),
+        }
+    }
+}
+
+impl Contact for PuppetContact {
+    fn active(&self) -> bool {
+        self.active
+    }
+    fn size(&self) -> usize {
+        self.j.nrows()
+    }
+    fn jacobian(&self) -> &DMatrix<f64> {
+        &self.j
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        let n = robot.nv();
+        self.j = DMatrix::identity(n, n);
+        Ok(())
+    }
+    fn add_constraints(&self, _problem: &mut Problem, _f: Variable) {}
+}

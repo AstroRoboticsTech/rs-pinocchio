@@ -7,7 +7,7 @@
 
 use nalgebra::{DVector, Matrix3};
 
-use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact};
+use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact, PuppetContact};
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
 use super::relative_tasks::RelativePositionTask;
 use super::task::DynamicsTask;
@@ -247,6 +247,13 @@ impl DynamicsSolver {
     pub fn add_planar_contact(&mut self, frame_index: usize) -> ContactId {
         self.contacts
             .push(Box::new(Contact6D::new(frame_index, true)));
+        self.contacts.len() - 1
+    }
+
+    /// Adds a puppet contact: an unconstrained generalized force on every DoF
+    /// (identity Jacobian), fully actuating the robot.
+    pub fn add_puppet_contact(&mut self) -> ContactId {
+        self.contacts.push(Box::new(PuppetContact::new()));
         self.contacts.len() - 1
     }
 

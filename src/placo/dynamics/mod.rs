@@ -13,7 +13,7 @@ mod solver;
 mod task;
 mod tasks;
 
-pub use contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact};
+pub use contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact, PuppetContact};
 pub use more_tasks::{CoMTask, OrientationTask, TargetTau, TorqueTask};
 pub use relative_tasks::RelativePositionTask;
 pub use solver::{ContactId, DynamicsResult, DynamicsSolver, FrameTaskHandle, TaskId};
