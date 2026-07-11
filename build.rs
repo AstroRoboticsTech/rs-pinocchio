@@ -14,6 +14,14 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // The Pinocchio binding is gated behind the `ffi` feature. When it is off
+    // (e.g. a pure-Rust `placo` build/test), there is nothing native to compile
+    // or link, so skip the probe entirely — this is what lets
+    // `cargo test --no-default-features --features placo` run without Pinocchio.
+    if std::env::var_os("CARGO_FEATURE_FFI").is_none() {
+        return;
+    }
+
     // docs.rs has no Pinocchio install: skip the native probe + C++ compile so
     // `cargo doc` (which never links) still builds the Rust API docs.
     if std::env::var_os("DOCS_RS").is_some() {

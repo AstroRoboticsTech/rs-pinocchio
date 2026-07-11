@@ -1,33 +1,37 @@
-//! Clean-room Rust bindings for the [Pinocchio] rigid-body dynamics library,
-//! via [cxx].
+//! Rust rigid-body dynamics and QP-based planning/control.
 //!
-//! The crate version tracks the bound Pinocchio version (currently `4.1.0`).
-//! Scope is forward kinematics + frame Jacobians — enough for a whole-body
-//! differential-IK layer to consume.
+//! Two layers live in this crate, each behind a Cargo feature:
 //!
-//! ```no_run
-//! use nalgebra::DVector;
-//! use rs_pinocchio::{Model, ReferenceFrame};
+//! - **`ffi`** (default) — clean-room [cxx] bindings to the [Pinocchio]
+//!   rigid-body dynamics library: the low-level [`Model`] + [`ReferenceFrame`].
+//!   Requires a linkable Pinocchio install at build time.
+//! - **`placo`** — a pure-Rust port of Rhoban [PlaCo], a QP-based planning and
+//!   control framework (task-space inverse kinematics / dynamics, footstep and
+//!   walk planning). The [`placo::tools`] and [`placo::problem`] layers need no
+//!   native dependencies and build without Pinocchio; higher layers additionally
+//!   require `ffi`.
 //!
-//! let mut model = Model::from_urdf("robot.urdf", /* floating_base = */ false)?;
-//! let q = DVector::zeros(model.nq());
+//! For a pure-Rust build (no Pinocchio needed), disable defaults:
 //!
-//! model.forward_kinematics(&q)?;
-//! model.update_frame_placements();
-//! let tip = model.frame_id("tool").expect("frame exists");
-//! let placement = model.frame_placement(tip)?;
-//!
-//! model.compute_joint_jacobians(&q)?;
-//! let jac = model.frame_jacobian(tip, ReferenceFrame::LocalWorldAligned)?; // 6 x nv
-//! # Ok::<(), rs_pinocchio::Error>(())
+//! ```sh
+//! cargo test --no-default-features --features placo
 //! ```
 //!
 //! [Pinocchio]: https://github.com/stack-of-tasks/pinocchio
+//! [PlaCo]: https://github.com/Rhoban/placo
 //! [cxx]: https://cxx.rs
 
 mod error;
+
+#[cfg(feature = "ffi")]
 mod ffi;
+#[cfg(feature = "ffi")]
 mod model;
 
+#[cfg(feature = "placo")]
+pub mod placo;
+
 pub use error::{Error, Result};
+
+#[cfg(feature = "ffi")]
 pub use model::{Model, ReferenceFrame};

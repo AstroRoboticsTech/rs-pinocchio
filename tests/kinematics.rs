@@ -6,6 +6,10 @@
 //! ```sh
 //! cargo test -- --ignored
 //! ```
+//!
+//! The whole file is behind the `ffi` feature so a pure-Rust
+//! `cargo test --no-default-features --features placo` build compiles cleanly.
+#![cfg(feature = "ffi")]
 
 use std::io::Write;
 use std::path::PathBuf;

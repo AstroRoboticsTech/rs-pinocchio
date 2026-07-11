@@ -3,17 +3,18 @@ name = "rs-pinocchio"
 version = "4.1.0"
 edition = "2021"
 license = "BSD-2-Clause"
-description = "Clean-room Rust bindings (cxx) for the Pinocchio rigid-body dynamics library — forward kinematics + frame Jacobians. Crate version tracks the bound Pinocchio version (4.1.0)."
+description = "Rust rigid-body dynamics + QP planning/control: clean-room cxx bindings to Pinocchio, plus a pure-Rust port of Rhoban PlaCo (task-space IK/ID, footstep & walk planning)."
 repository = "https://github.com/AstroRoboticsTech/rs-pinocchio"
-keywords = ["pinocchio", "robotics", "kinematics", "jacobian", "ffi"]
+keywords = ["pinocchio", "placo", "robotics", "kinematics", "control"]
 categories = ["science::robotics", "api-bindings"]
 readme = "README.md"
 links = "pinocchio_shim"
 
 [dependencies]
-cxx = "1"
 nalgebra = "0.33"
 thiserror = "2"
+cxx = { version = "1", optional = true }
+clarabel = { version = "0.9", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [build-dependencies]
@@ -21,10 +22,18 @@ cxx-build = "1"
 pkg-config = "0.3"
 
 [features]
-default = []
-# Emit tracing spans/events from the safe wrapper.
+# The Pinocchio cxx binding (low-level `Model`, `ReferenceFrame`). Requires a
+# linkable Pinocchio install at build time. Default-on to preserve the original
+# crate behaviour; disable with --no-default-features for a pure-Rust build.
+default = ["ffi"]
+ffi = ["dep:cxx"]
+# Pure-Rust port of Rhoban PlaCo. The `tools` + `problem` (QP) layers need no
+# native deps and build without Pinocchio. Higher layers (RobotWrapper, the
+# kinematics/dynamics solvers) additionally require `ffi`.
+placo = ["dep:clarabel"]
+# Emit tracing spans/events from the safe wrappers.
 trace = ["dep:tracing"]
 
 [package.metadata.docs.rs]
-# build.rs skips the native step when DOCS_RS is set, so docs build without Pinocchio.
+# build.rs skips the native step under DOCS_RS so docs build without Pinocchio.
 all-features = true
