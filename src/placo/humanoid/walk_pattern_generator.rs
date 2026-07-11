@@ -5,8 +5,9 @@
 //! a time-indexed query API for the resulting walk. Pure Rust — `plan` takes the
 //! initial CoM directly, so no robot model is required.
 //!
-//! This ports the core `plan` + trajectory queries. Adaptive `replan` /
-//! `update_supports` (online DCM tracking) are not yet ported.
+//! Ports `plan`, the trajectory queries, and adaptive `replan` (re-solve from a
+//! previous trajectory's state). `update_supports` (online DCM step-timing
+//! adaptation, which needs the operational-space polygons) is not yet ported.
 
 use nalgebra::{Isometry3, Translation3, UnitQuaternion, Vector2, Vector3};
 
@@ -82,6 +83,10 @@ impl WalkTrajectory {
     }
 
     fn find_part(&self, t: f64) -> &TrajectoryPart {
+        &self.parts[self.find_part_index(t)]
+    }
+
+    fn find_part_index(&self, t: f64) -> usize {
         let mut low = 0usize;
         let mut high = self.parts.len() - 1;
         while low != high {
@@ -92,10 +97,21 @@ impl WalkTrajectory {
             } else if t > part.t_end {
                 low = mid + 1;
             } else {
-                return part;
+                return mid;
             }
         }
-        &self.parts[low]
+        low
+    }
+
+    /// The support active at time `t`.
+    pub fn support_at(&self, t: f64) -> Support {
+        self.find_part(t).support.clone()
+    }
+
+    /// The support of the part following the one active at `t` (if any).
+    pub fn next_support(&self, t: f64) -> Option<Support> {
+        let idx = self.find_part_index(t);
+        self.parts.get(idx + 1).map(|p| p.support.clone())
     }
 
     fn foot_yaw_mut(&mut self, side: Side) -> &mut CubicSpline {
@@ -278,9 +294,60 @@ impl WalkPatternGenerator {
             self.parameters.walk_trunk_pitch,
             0.0,
         );
-        self.plan_com(&mut trajectory, supports, initial_com_world.xy())?;
-        self.plan_feet_trajectories(&mut trajectory);
+        self.plan_com(
+            &mut trajectory,
+            supports,
+            initial_com_world.xy(),
+            Vector2::zeros(),
+            Vector2::zeros(),
+        )?;
+        self.plan_feet_trajectories(&mut trajectory, None);
         Ok(trajectory)
+    }
+
+    /// Replans a walk from the state of a previous trajectory at `t_replan`
+    /// (re-solving the CoM from the measured position/velocity/acceleration and
+    /// re-generating the feet, continuing the current swing from the old one).
+    pub fn replan(
+        &self,
+        supports: &mut [Support],
+        old_trajectory: &mut WalkTrajectory,
+        t_replan: f64,
+    ) -> Result<WalkTrajectory> {
+        if supports.is_empty() {
+            return Err(Error::Solver("replan() called with 0 supports".into()));
+        }
+        let mut trajectory = WalkTrajectory::new(
+            self.parameters.walk_com_height,
+            t_replan,
+            self.parameters.walk_trunk_pitch,
+            0.0,
+        );
+        let initial_pos = old_trajectory.p_world_com(t_replan).xy();
+        let initial_vel = old_trajectory.v_world_com(t_replan).xy();
+        let initial_acc = old_trajectory.a_world_com(t_replan).xy();
+        self.plan_com(
+            &mut trajectory,
+            supports,
+            initial_pos,
+            initial_vel,
+            initial_acc,
+        )?;
+        self.plan_feet_trajectories(&mut trajectory, Some(old_trajectory));
+        Ok(trajectory)
+    }
+
+    /// Whether a replan is allowed at `t` (not at a start/end support, next
+    /// support not an end, and current support is single).
+    pub fn can_replan_supports(&self, trajectory: &WalkTrajectory, t: f64) -> bool {
+        let support = &trajectory.find_part(t).support;
+        if support.start || support.end || support.is_both() {
+            return false;
+        }
+        match trajectory.next_support(t) {
+            Some(next) => !next.end,
+            None => false,
+        }
     }
 
     fn plan_com(
@@ -288,6 +355,8 @@ impl WalkPatternGenerator {
         trajectory: &mut WalkTrajectory,
         supports: &mut [Support],
         initial_pos: Vector2<f64>,
+        initial_vel: Vector2<f64>,
+        initial_acc: Vector2<f64>,
     ) -> Result<()> {
         let mut problem = Problem::new();
         let mut lipms: Vec<Lipm> = Vec::new();
@@ -317,8 +386,8 @@ impl WalkPatternGenerator {
                     lipm_timesteps,
                     part_t_start,
                     initial_pos,
-                    Vector2::zeros(),
-                    Vector2::zeros(),
+                    initial_vel,
+                    initial_acc,
                 )
             } else {
                 Lipm::from_previous(
@@ -407,23 +476,31 @@ impl WalkPatternGenerator {
         }
     }
 
-    fn plan_feet_trajectories(&self, trajectory: &mut WalkTrajectory) {
+    fn plan_feet_trajectories(
+        &self,
+        trajectory: &mut WalkTrajectory,
+        mut old: Option<&mut WalkTrajectory>,
+    ) {
         let first_support = trajectory.parts[0].support.clone();
         trajectory.add_supports(trajectory.t_start, &first_support);
-        let trunk_yaw0 = frame_yaw(
-            &first_support
-                .frame()
-                .rotation
-                .to_rotation_matrix()
-                .into_inner(),
-        );
+        let trunk_yaw0 = match old.as_deref_mut() {
+            // Continue the trunk yaw from the old trajectory.
+            Some(o) => o.yaw_world_trunk(trajectory.t_start),
+            None => frame_yaw(
+                &first_support
+                    .frame()
+                    .rotation
+                    .to_rotation_matrix()
+                    .into_inner(),
+            ),
+        };
         trajectory
             .trunk_yaw
             .add_point(trajectory.t_start, trunk_yaw0, 0.0);
 
         for i in 0..trajectory.parts.len() {
             if trajectory.parts[i].support.footsteps.len() == 1 {
-                self.plan_sgl_support(trajectory, i);
+                self.plan_sgl_support(trajectory, i, old.as_deref_mut());
             } else {
                 self.plan_dbl_support(trajectory, i);
             }
@@ -440,7 +517,12 @@ impl WalkPatternGenerator {
         trajectory.trunk_yaw.add_point(t_end, yaw, 0.0);
     }
 
-    fn plan_sgl_support(&self, trajectory: &mut WalkTrajectory, i: usize) {
+    fn plan_sgl_support(
+        &self,
+        trajectory: &mut WalkTrajectory,
+        i: usize,
+        old: Option<&mut WalkTrajectory>,
+    ) {
         let part = &trajectory.parts[i];
         let (t_start, t_end) = (part.t_start, part.t_end);
         let support = part.support.clone();
@@ -449,15 +531,23 @@ impl WalkPatternGenerator {
         let t_world_end = trajectory.parts[i + 1].support.footstep_frame(flying_side);
 
         let virt_duration = self.support_default_duration(&support) * support.time_ratio;
-        let start = if i > 0 {
+        let start = if i == 0 {
+            match old {
+                // Replan: continue the swing from the old trajectory's flying foot.
+                Some(o) => {
+                    o.t_world_foot(flying_side, trajectory.t_start)
+                        .translation
+                        .vector
+                }
+                // No previous part and no old trajectory: degenerate start = target.
+                None => t_world_end.translation.vector,
+            }
+        } else {
             trajectory.parts[i - 1]
                 .support
                 .footstep_frame(flying_side)
                 .translation
                 .vector
-        } else {
-            // No previous part (first part is single): degenerate start = target.
-            t_world_end.translation.vector
         };
 
         let swing = SwingFoot::make_trajectory(
@@ -527,5 +617,50 @@ mod tests {
         let rf = traj.t_world_right(traj.t_start);
         assert!(lf.translation.vector.iter().all(|v| v.is_finite()));
         assert!(rf.translation.vector.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn replan_preserves_com_continuity() {
+        let params = HumanoidParameters::new();
+        let mut planner = FootstepsPlannerRepetitive::new(params.clone());
+        planner.configure(0.05, 0.0, 0.0, 6);
+        let footsteps = planner.plan(
+            Side::Left,
+            Isometry3::translation(0.0, params.feet_spacing / 2.0, 0.0),
+            Isometry3::translation(0.0, -params.feet_spacing / 2.0, 0.0),
+        );
+        let mut supports = make_supports(&footsteps, 0.0, true, false, true);
+
+        let wpg = WalkPatternGenerator::new(params);
+        let initial_com = Vector3::new(0.0, 0.0, wpg.parameters.walk_com_height);
+        let mut traj = wpg.plan(&mut supports, initial_com, 0.0).expect("plan");
+
+        // Find a single-support time where a replan is allowed.
+        let t_replan = {
+            let mut t = traj.t_start;
+            loop {
+                if t >= traj.t_end {
+                    panic!("no replannable time found");
+                }
+                if wpg.can_replan_supports(&traj, t) {
+                    break t;
+                }
+                t += 0.05;
+            }
+        };
+
+        let com_before = traj.p_world_com(t_replan);
+        let mut supports2 = make_supports(&footsteps, t_replan, true, false, true);
+        let new_traj = wpg
+            .replan(&mut supports2, &mut traj, t_replan)
+            .expect("replan");
+
+        // The replanned trajectory starts at t_replan with the previous CoM.
+        assert!((new_traj.t_start - t_replan).abs() < 1e-9);
+        let com_after = new_traj.p_world_com(new_traj.t_start);
+        assert!(
+            (com_before - com_after).norm() < 1e-3,
+            "CoM jumped at replan"
+        );
     }
 }
