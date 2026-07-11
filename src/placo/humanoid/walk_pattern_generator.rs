@@ -193,6 +193,16 @@ impl WalkTrajectory {
     pub fn yaw_world_trunk(&mut self, t: f64) -> f64 {
         self.trunk_yaw.pos(t)
     }
+
+    /// Trunk orientation in the world at time `t`
+    /// (`Rz(yaw) · Ry(pitch) · Rx(roll)`).
+    pub fn r_world_trunk(&mut self, t: f64) -> nalgebra::Matrix3<f64> {
+        let yaw = self.trunk_yaw.pos(t);
+        let rz = nalgebra::Rotation3::from_axis_angle(&Vector3::z_axis(), yaw);
+        let ry = nalgebra::Rotation3::from_axis_angle(&Vector3::y_axis(), self.trunk_pitch);
+        let rx = nalgebra::Rotation3::from_axis_angle(&Vector3::x_axis(), self.trunk_roll);
+        (rz * ry * rx).into_inner()
+    }
 }
 
 /// Generates walk trajectories from a support sequence.

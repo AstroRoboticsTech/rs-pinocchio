@@ -12,6 +12,8 @@ mod parameters;
 mod side;
 mod swing_foot;
 mod walk_pattern_generator;
+#[cfg(feature = "ffi")]
+mod walk_tasks;
 
 pub use footsteps::{
     make_supports, Footstep, FootstepsPlanner, FootstepsPlannerNaive, FootstepsPlannerRepetitive,
@@ -24,3 +26,5 @@ pub use parameters::{FootstepClipping, HumanoidParameters};
 pub use side::Side;
 pub use swing_foot::{SwingFoot, SwingFootQuintic};
 pub use walk_pattern_generator::{TrajectoryPart, WalkPatternGenerator, WalkTrajectory};
+#[cfg(feature = "ffi")]
+pub use walk_tasks::WalkTasks;
