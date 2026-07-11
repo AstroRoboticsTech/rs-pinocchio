@@ -15,6 +15,7 @@
 //! planning) build on the Pinocchio binding and additionally require the `ffi`
 //! feature.
 
+pub mod humanoid;
 #[cfg(feature = "ffi")]
 pub mod kinematics;
 #[cfg(feature = "ffi")]
