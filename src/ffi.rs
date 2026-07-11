@@ -76,6 +76,9 @@ pub(crate) mod bridge {
         fn neutral(self: &PinocchioModel, out: &mut [f64]);
         /// `out = integrate(q, v)` on the configuration manifold (`out` len `nq`).
         fn integrate(self: &PinocchioModel, q: &[f64], v: &[f64], out: &mut [f64]) -> Result<()>;
+        /// `out = difference(q0, q1)`: the velocity mapping `q0` to `q1` (`out` len `nv`).
+        fn difference(self: &PinocchioModel, q0: &[f64], q1: &[f64], out: &mut [f64])
+            -> Result<()>;
 
         /// Center of mass position for `q` into `out` (length 3).
         fn center_of_mass(self: Pin<&mut PinocchioModel>, q: &[f64], out: &mut [f64])

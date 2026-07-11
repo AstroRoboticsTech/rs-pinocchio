@@ -334,6 +334,16 @@ impl RobotWrapper {
         Ok(())
     }
 
+    /// The velocity `v` (length `nv`) such that `integrate(q0, v) = q1`
+    /// (`pinocchio::difference`).
+    pub fn difference(&self, q0: &DVector<f64>, q1: &DVector<f64>) -> Result<DVector<f64>> {
+        let mut out = DVector::zeros(self.nv);
+        self.inner
+            .difference(q0.as_slice(), q1.as_slice(), out.as_mut_slice())
+            .map_err(|e| Error::Cxx(e.what().to_string()))?;
+        Ok(out)
+    }
+
     /// Integrates the state over `dt`: `qd += dt·qdd`, then `q ← integrate(q, dt·qd)`.
     pub fn integrate(&mut self, dt: f64) -> Result<()> {
         self.state.qd += dt * &self.state.qdd;

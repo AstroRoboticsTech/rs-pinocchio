@@ -258,6 +258,13 @@ void PinocchioModel::integrate(rust::Slice<const double> q, rust::Slice<const do
   copy_vector(out, pinocchio::integrate(impl_->model, qv, vv));
 }
 
+void PinocchioModel::difference(rust::Slice<const double> q0, rust::Slice<const double> q1,
+                                rust::Slice<double> out) const {
+  auto q0v = map_q(impl_->model, q0);
+  auto q1v = map_q(impl_->model, q1);
+  copy_vector(out, pinocchio::difference(impl_->model, q0v, q1v));
+}
+
 void PinocchioModel::center_of_mass(rust::Slice<const double> q, rust::Slice<double> out) {
   auto qv = map_q(impl_->model, q);
   pinocchio::centerOfMass(impl_->model, impl_->data, qv);

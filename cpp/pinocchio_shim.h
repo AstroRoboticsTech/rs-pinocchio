@@ -73,6 +73,8 @@ public:
   void neutral(rust::Slice<double> out) const;
   void integrate(rust::Slice<const double> q, rust::Slice<const double> v,
                  rust::Slice<double> out) const;
+  void difference(rust::Slice<const double> q0, rust::Slice<const double> q1,
+                  rust::Slice<double> out) const;
 
   void center_of_mass(rust::Slice<const double> q, rust::Slice<double> out);
   void com_jacobian(rust::Slice<const double> q, rust::Slice<double> out);

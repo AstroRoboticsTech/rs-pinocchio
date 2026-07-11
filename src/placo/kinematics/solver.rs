@@ -445,7 +445,16 @@ impl KinematicsSolver {
         };
 
         if apply {
+            let q_save = robot.state.q.clone();
+            let qd_save = robot.state.qd.clone();
             robot.integrate_configuration(&qd_sol)?;
+            // With a timestep, back-fill velocity/acceleration state like PlaCo.
+            if self.dt > 0.0 {
+                let q_new = robot.state.q.clone();
+                let qd = robot.difference(&q_save, &q_new)? / self.dt;
+                robot.state.qdd = (&qd - &qd_save) / self.dt;
+                robot.state.qd = qd;
+            }
         }
         Ok(qd_sol)
     }

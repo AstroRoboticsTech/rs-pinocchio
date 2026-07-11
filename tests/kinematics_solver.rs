@@ -87,6 +87,36 @@ fn ik_reaches_a_reachable_position_target() {
 
 #[test]
 #[ignore = "requires a linkable Pinocchio install"]
+fn apply_backfills_velocity_state() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    let tool = robot.frame_index("tool").expect("tool frame");
+    robot.set_joint("joint1", 0.4).unwrap();
+    robot.set_joint("joint2", -0.6).unwrap();
+    robot.update_kinematics().unwrap();
+    let target = robot.t_world_frame(tool).unwrap().translation.vector;
+    robot.reset();
+
+    let mut solver = KinematicsSolver::new(&robot);
+    solver.mask_fbase(true);
+    solver.dt = 0.01; // enables the velocity/acceleration back-fill
+    solver.add_position_task(tool, target);
+    solver.add_regularization_task(1e-6);
+
+    let qd = solver.solve(&mut robot, true).expect("solve");
+    assert!(qd.norm() > 1e-6);
+    // With dt>0 and apply, the robot's velocity state is populated from the step.
+    assert!(
+        robot.state.qd.iter().any(|v| v.abs() > 1e-9),
+        "qd was not back-filled"
+    );
+    assert!(robot.state.qd.iter().all(|v| v.is_finite()));
+    assert!(robot.state.qdd.iter().all(|v| v.is_finite()));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
 fn scaled_task_degrades_gracefully() {
     let path = write_fixture();
     let mut robot = RobotWrapper::from_urdf(&path).expect("load");
