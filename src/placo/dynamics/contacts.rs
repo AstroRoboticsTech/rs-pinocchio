@@ -364,6 +364,8 @@ pub struct TaskContact {
     pub task_id: usize,
     /// Whether this contact is active.
     pub active: bool,
+    /// Soft weight to minimize the contact force.
+    pub weight_forces: f64,
     j: DMatrix<f64>,
 }
 
@@ -372,6 +374,7 @@ impl TaskContact {
         Self {
             task_id,
             active: true,
+            weight_forces: 0.0,
             j: DMatrix::zeros(0, 0),
         }
     }
@@ -399,7 +402,15 @@ impl Contact for TaskContact {
         // The Jacobian is supplied by the solver from the referenced task's A.
         Ok(())
     }
-    fn add_constraints(&self, _problem: &mut Problem, _f: Variable) {}
+    fn add_constraints(&self, problem: &mut Problem, f: Variable) {
+        if self.weight_forces > 0.0 {
+            let e = f.expr();
+            let rows = e.rows();
+            problem
+                .add_constraint(e.equal_vector(DVector::zeros(rows)))
+                .configure(ConstraintPriority::Soft, self.weight_forces);
+        }
+    }
 }
 
 /// A "puppet" contact applying an unconstrained generalized force on every DoF
@@ -408,6 +419,8 @@ impl Contact for TaskContact {
 pub struct PuppetContact {
     /// Whether this contact is active.
     pub active: bool,
+    /// Soft weight to minimize the generalized force.
+    pub weight_forces: f64,
     j: DMatrix<f64>,
 }
 
@@ -415,6 +428,7 @@ impl PuppetContact {
     pub(crate) fn new() -> Self {
         Self {
             active: true,
+            weight_forces: 0.0,
             j: DMatrix::zeros(0, 0),
         }
     }
@@ -438,5 +452,13 @@ impl Contact for PuppetContact {
         self.j = DMatrix::identity(n, n);
         Ok(())
     }
-    fn add_constraints(&self, _problem: &mut Problem, _f: Variable) {}
+    fn add_constraints(&self, problem: &mut Problem, f: Variable) {
+        if self.weight_forces > 0.0 {
+            let e = f.expr();
+            let rows = e.rows();
+            problem
+                .add_constraint(e.equal_vector(DVector::zeros(rows)))
+                .configure(ConstraintPriority::Soft, self.weight_forces);
+        }
+    }
 }

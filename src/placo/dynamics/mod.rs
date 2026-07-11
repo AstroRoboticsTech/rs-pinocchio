@@ -17,7 +17,7 @@ pub use contacts::{
     Contact, Contact6D, ExternalWrenchContact, LineContact, PointContact, PuppetContact,
     TaskContact,
 };
-pub use more_tasks::{CoMTask, OrientationTask, TargetTau, TorqueTask};
+pub use more_tasks::{CoMTask, GearTask, OrientationTask, TargetTau, TorqueTask};
 pub use relative_tasks::{RelativeOrientationTask, RelativePositionTask};
 pub use solver::{ContactId, DynamicsResult, DynamicsSolver, FrameTaskHandle, TaskId};
 pub use task::{DynamicsTask, TaskBase};

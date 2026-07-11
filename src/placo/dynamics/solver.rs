@@ -11,7 +11,7 @@ use super::contacts::{
     Contact, Contact6D, ExternalWrenchContact, LineContact, PointContact, PuppetContact,
     TaskContact,
 };
-use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
+use super::more_tasks::{CoMTask, GearTask, OrientationTask, TorqueTask};
 use super::relative_tasks::{RelativeOrientationTask, RelativePositionTask};
 use super::task::DynamicsTask;
 use super::tasks::{JointsTask, PositionTask};
@@ -71,6 +71,8 @@ pub struct DynamicsSolver {
     pub joint_limits: bool,
     /// Safe deceleration used by the position limits [rad/s²].
     pub qdd_safe: f64,
+    /// Per-joint `qdd_safe` overrides (joint name → value).
+    qdd_safe_overrides: Vec<(String, f64)>,
 }
 
 impl DynamicsSolver {
@@ -90,7 +92,16 @@ impl DynamicsSolver {
             velocity_limits: false,
             joint_limits: false,
             qdd_safe: 1.0,
+            qdd_safe_overrides: Vec::new(),
         }
+    }
+
+    /// Overrides the safe deceleration for a single joint (PlaCo `set_qdd_safe`);
+    /// the last value for a joint wins.
+    pub fn set_qdd_safe(&mut self, joint: impl Into<String>, qdd_safe: f64) {
+        let joint = joint.into();
+        self.qdd_safe_overrides.retain(|(j, _)| *j != joint);
+        self.qdd_safe_overrides.push((joint, qdd_safe));
     }
 
     fn add_limits(
@@ -124,24 +135,34 @@ impl DynamicsSolver {
 
         if self.joint_limits {
             let (lower, upper) = robot.position_limits();
+            // Resolve per-joint qdd_safe overrides to velocity offsets.
+            let mut qdd_safe_by_v: std::collections::HashMap<usize, f64> =
+                std::collections::HashMap::new();
+            for (joint, val) in &self.qdd_safe_overrides {
+                qdd_safe_by_v.insert(robot.joint_v_offset(joint)?, *val);
+            }
             for k in 0..count {
                 // q index = v index + 1 for the actuated (single-DoF) joints.
                 let q = robot.state.q[k + 7];
                 let qd = robot.state.qd[k + 6];
+                let qdd_safe = qdd_safe_by_v
+                    .get(&(6 + k))
+                    .copied()
+                    .unwrap_or(self.qdd_safe);
                 let qdd_k = qdd.expr_slice(6 + k, 1);
                 // Upper bound: a braking envelope, or a hard decel if already past it.
                 if q > upper[k + 7] {
-                    problem.add_constraint(qdd_k.leq_scalar(-self.qdd_safe));
+                    problem.add_constraint(qdd_k.leq_scalar(-qdd_safe));
                 } else {
-                    let qd_max = (2.0 * (upper[k + 7] - q) * self.qdd_safe).sqrt();
+                    let qd_max = (2.0 * (upper[k + 7] - q) * qdd_safe).sqrt();
                     problem
                         .add_constraint(qdd_k.scale(self.dt).piecewise_add(qd).leq_scalar(qd_max));
                 }
                 // Lower bound: mirror image.
                 if q < lower[k + 7] {
-                    problem.add_constraint(qdd_k.geq_scalar(self.qdd_safe));
+                    problem.add_constraint(qdd_k.geq_scalar(qdd_safe));
                 } else {
-                    let qd_max = (2.0 * (lower[k + 7] - q).abs() * self.qdd_safe).sqrt();
+                    let qd_max = (2.0 * (lower[k + 7] - q).abs() * qdd_safe).sqrt();
                     problem
                         .add_constraint(qdd_k.scale(self.dt).piecewise_add(qd).geq_scalar(-qd_max));
                 }
@@ -242,6 +263,11 @@ impl DynamicsSolver {
     /// Adds an (empty) joints task.
     pub fn add_joints_task(&mut self) -> TaskId {
         self.push_task(Box::new(JointsTask::new()))
+    }
+
+    /// Adds an (empty) gear task; configure it via [`Self::task_mut`].
+    pub fn add_gear_task(&mut self) -> TaskId {
+        self.push_task(Box::new(GearTask::new()))
     }
 
     /// Sets a task's priority and weight.

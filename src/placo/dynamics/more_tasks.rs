@@ -199,3 +199,81 @@ impl DynamicsTask for TorqueTask {
         Ok(())
     }
 }
+
+/// PD acceleration task coupling joints with gear ratios, keeping
+/// `q_target = Σ ratio·q_source` (PlaCo dynamics `GearTask`).
+pub struct GearTask {
+    base: TaskBase,
+    /// `target → [(source, ratio)]` relations.
+    gears: Vec<(String, Vec<(String, f64)>)>,
+}
+
+impl GearTask {
+    pub(crate) fn new() -> Self {
+        Self {
+            base: TaskBase::default(),
+            gears: Vec::new(),
+        }
+    }
+
+    /// Sets a single gear relation `target = ratio · source` (replacing all others).
+    pub fn set_gear(&mut self, target: impl Into<String>, source: impl Into<String>, ratio: f64) {
+        self.gears.clear();
+        self.add_gear(target, source, ratio);
+    }
+
+    /// Adds a source term `+= ratio · source` to `target`'s gear relation.
+    pub fn add_gear(&mut self, target: impl Into<String>, source: impl Into<String>, ratio: f64) {
+        let target = target.into();
+        let source = source.into();
+        if let Some((_, sources)) = self.gears.iter_mut().find(|(t, _)| *t == target) {
+            if let Some((_, r)) = sources.iter_mut().find(|(s, _)| *s == source) {
+                *r = ratio;
+            } else {
+                sources.push((source, ratio));
+            }
+        } else {
+            self.gears.push((target, vec![(source, ratio)]));
+        }
+    }
+}
+
+impl DynamicsTask for GearTask {
+    fn base(&self) -> &TaskBase {
+        &self.base
+    }
+    fn base_mut(&mut self) -> &mut TaskBase {
+        &mut self.base
+    }
+    fn type_name(&self) -> &'static str {
+        "gear"
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        let n = robot.nv();
+        let mut a = DMatrix::zeros(self.gears.len(), n);
+        let mut b = DVector::zeros(self.gears.len());
+        let kd = self.base.get_kd();
+        for (k, (target, sources)) in self.gears.iter().enumerate() {
+            let t_off = robot.joint_v_offset(target)?;
+            a[(k, t_off)] = -1.0;
+            // q index = v index + 1 for single-DoF actuated joints (floating base).
+            let q_target = robot.state.q[t_off + 1];
+            let qd_target = robot.state.qd[t_off];
+            let mut desired_q = 0.0;
+            let mut desired_qd = 0.0;
+            for (source, ratio) in sources {
+                let s_off = robot.joint_v_offset(source)?;
+                desired_q += robot.state.q[s_off + 1] * ratio;
+                desired_qd += robot.state.qd[s_off] * ratio;
+                a[(k, s_off)] = *ratio;
+            }
+            b[k] = self.base.kp * (q_target - desired_q) + kd * (qd_target - desired_qd);
+        }
+        self.base.a = a;
+        self.base.b = b;
+        Ok(())
+    }
+}
