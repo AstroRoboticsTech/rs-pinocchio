@@ -124,23 +124,28 @@ impl DynamicsSolver {
 
         if self.joint_limits {
             let (lower, upper) = robot.position_limits();
-            let qd_bottom = robot.state.qd.rows(6, count).into_owned();
-            let mut qd_max_up = DVector::zeros(count);
-            let mut qd_max_lo = DVector::zeros(count);
             for k in 0..count {
                 // q index = v index + 1 for the actuated (single-DoF) joints.
                 let q = robot.state.q[k + 7];
-                let du = (upper[k + 7] - q).clamp(0.0, 1e6);
-                let dl = (q - lower[k + 7]).clamp(0.0, 1e6);
-                qd_max_up[k] = (2.0 * du * self.qdd_safe).sqrt();
-                qd_max_lo[k] = (2.0 * dl * self.qdd_safe).sqrt();
+                let qd = robot.state.qd[k + 6];
+                let qdd_k = qdd.expr_slice(6 + k, 1);
+                // Upper bound: a braking envelope, or a hard decel if already past it.
+                if q > upper[k + 7] {
+                    problem.add_constraint(qdd_k.leq_scalar(-self.qdd_safe));
+                } else {
+                    let qd_max = (2.0 * (upper[k + 7] - q) * self.qdd_safe).sqrt();
+                    problem
+                        .add_constraint(qdd_k.scale(self.dt).piecewise_add(qd).leq_scalar(qd_max));
+                }
+                // Lower bound: mirror image.
+                if q < lower[k + 7] {
+                    problem.add_constraint(qdd_k.geq_scalar(self.qdd_safe));
+                } else {
+                    let qd_max = (2.0 * (lower[k + 7] - q).abs() * self.qdd_safe).sqrt();
+                    problem
+                        .add_constraint(qdd_k.scale(self.dt).piecewise_add(qd).geq_scalar(-qd_max));
+                }
             }
-            let e = qdd
-                .expr_slice(6, count)
-                .scale(self.dt)
-                .add_vector(&qd_bottom);
-            problem.add_constraint(e.leq_vector(qd_max_up));
-            problem.add_constraint(e.geq_vector(-qd_max_lo));
         }
         Ok(())
     }

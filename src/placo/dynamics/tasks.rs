@@ -61,6 +61,8 @@ impl DynamicsTask for PositionTask {
         let dj_pos = dj.rows(0, 3).into_owned();
 
         let t = robot.t_world_frame(self.frame_index)?;
+        // Keep the local-frame mask rotation current, like PlaCo (and OrientationTask).
+        self.base.mask.r_local_world = t.rotation.to_rotation_matrix().into_inner().transpose();
         let position_error = self.target_world - t.translation.vector;
         let velocity_world = &j_pos * &robot.state.qd;
         let velocity_error = self.dtarget_world - velocity_world;
