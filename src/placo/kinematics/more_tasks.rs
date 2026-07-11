@@ -36,7 +36,13 @@ impl GearTask {
         let target = target.into();
         let source = source.into();
         if let Some((_, sources)) = self.gears.iter_mut().find(|(t, _)| *t == target) {
-            sources.push((source, ratio));
+            // Overwrite an existing source (last ratio wins), matching PlaCo's
+            // per-source map, so A and b stay consistent for duplicate sources.
+            if let Some((_, r)) = sources.iter_mut().find(|(s, _)| *s == source) {
+                *r = ratio;
+            } else {
+                sources.push((source, ratio));
+            }
         } else {
             self.gears.push((target, vec![(source, ratio)]));
         }
@@ -77,10 +83,9 @@ impl KinematicsTask for GearTask {
     }
 }
 
-/// Regularizes towards minimum kinetic energy `½·qdᵀ·M·qd` (PlaCo
-/// `KineticEnergyRegularizationTask`). Requires `solver.dt`.
-///
-/// Excludes the floating base, matching PlaCo.
+/// Regularizes towards minimum kinetic energy `½·qdᵀ·M·qd` via `M^½/(√2·dt)`
+/// over the full configuration (PlaCo `KineticEnergyRegularizationTask`).
+/// Requires `solver.dt`.
 pub struct KineticEnergyRegularizationTask {
     base: TaskBase,
 }
