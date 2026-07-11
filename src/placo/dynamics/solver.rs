@@ -9,7 +9,7 @@ use nalgebra::{DVector, Matrix3};
 
 use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact, PuppetContact};
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
-use super::relative_tasks::RelativePositionTask;
+use super::relative_tasks::{RelativeOrientationTask, RelativePositionTask};
 use super::task::DynamicsTask;
 use super::tasks::{JointsTask, PositionTask};
 use crate::error::{Error, Result};
@@ -195,6 +195,35 @@ impl DynamicsSolver {
         self.push_task(Box::new(RelativePositionTask::new(
             frame_a, frame_b, target,
         )))
+    }
+
+    /// Adds a relative-orientation task (orientation of `frame_b` in `frame_a`).
+    pub fn add_relative_orientation_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        r_a_b: Matrix3<f64>,
+    ) -> TaskId {
+        self.push_task(Box::new(RelativeOrientationTask::new(
+            frame_a, frame_b, r_a_b,
+        )))
+    }
+
+    /// Adds a relative-frame (position + orientation) task: the pose of
+    /// `frame_b` expressed in `frame_a`.
+    pub fn add_relative_frame_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        t_a_b: nalgebra::Isometry3<f64>,
+    ) -> FrameTaskHandle {
+        let position = self.add_relative_position_task(frame_a, frame_b, t_a_b.translation.vector);
+        let r = t_a_b.rotation.to_rotation_matrix().into_inner();
+        let orientation = self.add_relative_orientation_task(frame_a, frame_b, r);
+        FrameTaskHandle {
+            position,
+            orientation,
+        }
     }
 
     /// Adds an (empty) torque task.

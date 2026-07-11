@@ -7,6 +7,8 @@
 use std::io::Write;
 use std::path::PathBuf;
 
+use nalgebra::Matrix3;
+
 use rs_pinocchio::placo::dynamics::DynamicsSolver;
 use rs_pinocchio::placo::model::RobotWrapper;
 use rs_pinocchio::placo::tools::Priority;
@@ -106,5 +108,42 @@ fn foot_contacts_balance_gravity() {
     );
     // Unilateral contacts push (non-negative normal force).
     assert!(fz_left >= -1e-9 && fz_right >= -1e-9);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn relative_orientation_task_drives_legs() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load biped");
+    robot.update_kinematics().expect("update kinematics");
+
+    let left = robot.frame_index("left_leg").expect("left leg");
+    let right = robot.frame_index("right_leg").expect("right leg");
+
+    let mut solver = DynamicsSolver::new(&robot);
+    solver.gravity_only = true;
+    // Fully actuate the robot so the orientation target is reachable.
+    solver.add_puppet_contact();
+
+    // Target a 0.3 rad relative rotation of the right leg about y in the left
+    // leg's frame; both legs start aligned, so the task must produce a non-zero
+    // generalized acceleration.
+    let (s, c) = (0.3f64.sin(), 0.3f64.cos());
+    #[rustfmt::skip]
+    let r_a_b = Matrix3::new(
+        c, 0.0, s,
+        0.0, 1.0, 0.0,
+        -s, 0.0, c,
+    );
+    let tid = solver.add_relative_orientation_task(left, right, r_a_b);
+    solver.configure_task(tid, Priority::Soft, 1.0);
+
+    let result = solver.solve(&mut robot, false).expect("dynamics solve");
+    assert!(result.success);
+    assert!(result.tau.iter().all(|v| v.is_finite()));
+    assert!(result.qdd.iter().all(|v| v.is_finite()));
+    // The task pushes the legs apart, so the solve is not trivially zero.
+    assert!(result.qdd.norm() > 1e-6, "qdd norm {}", result.qdd.norm());
     let _ = std::fs::remove_file(&path);
 }

@@ -1,7 +1,8 @@
-//! Relative-frame dynamics tasks (PlaCo `dynamics::RelativePositionTask`).
+//! Relative-frame dynamics tasks (PlaCo `dynamics::RelativePositionTask`,
+//! `RelativeOrientationTask`).
 //!
-//! The relative-orientation / relative-frame dynamics tasks (which need the
-//! SO(3) log Jacobian `Jlog3`) are not yet ported.
+//! The relative-orientation task uses the SO(3) log Jacobian `Jlog3` to map the
+//! world-frame angular error to a generalized-acceleration residual.
 
 use nalgebra::{DMatrix, DVector, Vector3};
 
@@ -114,6 +115,114 @@ impl DynamicsTask for RelativePositionTask {
 
         self.base.a = self.base.mask.apply(&j);
         let b_vec = -Vector3::new(e[0], e[1], e[2]) + desired_acc;
+        self.base.b = col_to_vector(self.base.mask.apply(&vec3_to_col(&b_vec)));
+        Ok(())
+    }
+}
+
+/// SO(3) log Jacobian `Jlog3(v)` for `v = log3(R)` (Pinocchio's formula).
+fn jlog3(log: &Vector3<f64>) -> nalgebra::Matrix3<f64> {
+    let t2 = log.norm_squared();
+    let t = t2.sqrt();
+    let (alpha, diag) = if t < 1e-8 {
+        (1.0 / 12.0 + t2 / 720.0, 1.0 - t2 / 12.0)
+    } else {
+        let (st, ct) = (t.sin(), t.cos());
+        let st_1mct = st / (1.0 - ct);
+        (1.0 / t2 - st_1mct / (2.0 * t), 0.5 * t * st_1mct)
+    };
+    let vvt = log * log.transpose();
+    #[rustfmt::skip]
+    let skew = nalgebra::Matrix3::new(
+        0.0, -log.z, log.y,
+        log.z, 0.0, -log.x,
+        -log.y, log.x, 0.0,
+    );
+    alpha * vvt + diag * nalgebra::Matrix3::identity() + 0.5 * skew
+}
+
+/// PD acceleration task on the relative orientation `R_a_b` (PlaCo dynamics
+/// `RelativeOrientationTask`).
+pub struct RelativeOrientationTask {
+    base: TaskBase,
+    /// Reference frame `a`.
+    pub frame_a: usize,
+    /// Target frame `b`.
+    pub frame_b: usize,
+    /// Target relative orientation `R_a_b`.
+    pub r_a_b: nalgebra::Matrix3<f64>,
+    /// Target relative angular velocity (in `a`).
+    pub omega_a_b: Vector3<f64>,
+    /// Target relative angular acceleration (in `a`).
+    pub domega_a_b: Vector3<f64>,
+}
+
+impl RelativeOrientationTask {
+    pub(crate) fn new(frame_a: usize, frame_b: usize, r_a_b: nalgebra::Matrix3<f64>) -> Self {
+        Self {
+            base: TaskBase::default(),
+            frame_a,
+            frame_b,
+            r_a_b,
+            omega_a_b: Vector3::zeros(),
+            domega_a_b: Vector3::zeros(),
+        }
+    }
+}
+
+impl DynamicsTask for RelativeOrientationTask {
+    fn base(&self) -> &TaskBase {
+        &self.base
+    }
+    fn base_mut(&mut self) -> &mut TaskBase {
+        &mut self.base
+    }
+    fn type_name(&self) -> &'static str {
+        "relative_orientation"
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        use crate::ReferenceFrame::World;
+        let ja = robot.frame_jacobian(self.frame_a, World)?;
+        let dja = robot.frame_jacobian_time_variation(self.frame_a, World)?;
+        let jb = robot.frame_jacobian(self.frame_b, World)?;
+        let djb = robot.frame_jacobian_time_variation(self.frame_b, World)?;
+        let ja_rot = ja.rows(3, 3).into_owned();
+        let jb_rot = jb.rows(3, 3).into_owned();
+        let dja_rot = dja.rows(3, 3).into_owned();
+        let djb_rot = djb.rows(3, 3).into_owned();
+        let qd = &robot.state.qd;
+
+        let r_world_a = robot
+            .t_world_frame(self.frame_a)?
+            .rotation
+            .to_rotation_matrix()
+            .into_inner();
+        let r_world_b = robot
+            .t_world_frame(self.frame_b)?
+            .rotation
+            .to_rotation_matrix()
+            .into_inner();
+        let r_a_b_real = r_world_a.transpose() * r_world_b;
+        let m = self.r_a_b * r_a_b_real.transpose();
+        let log = nalgebra::Rotation3::from_matrix_unchecked(m).scaled_axis();
+        let error_world = r_world_a * log;
+
+        let omega_a = &ja_rot * qd;
+        let omega_b = &jb_rot * qd;
+        let omega_ab_real = &omega_b - &omega_a;
+        let vel_error = r_world_a * self.omega_a_b
+            - Vector3::new(omega_ab_real[0], omega_ab_real[1], omega_ab_real[2]);
+        let kd = self.base.get_kd();
+        let desired_acc = self.base.kp * error_world + kd * vel_error + self.domega_a_b;
+
+        let jlog = dmat3(&jlog3(&log));
+        let a = self.base.mask.apply(&(&jlog * (&jb_rot - &ja_rot)));
+        let coriolis = &jlog * ((&djb_rot * qd) - (&dja_rot * qd));
+        let b_vec = desired_acc - Vector3::new(coriolis[0], coriolis[1], coriolis[2]);
+        self.base.a = a;
         self.base.b = col_to_vector(self.base.mask.apply(&vec3_to_col(&b_vec)));
         Ok(())
     }
