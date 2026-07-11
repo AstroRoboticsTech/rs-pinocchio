@@ -199,7 +199,9 @@ impl Contact for Contact6D {
 /// A 5-DoF line ("knife-edge") contact along the frame's local x-axis (PlaCo
 /// `LineContact`). Like [`Contact6D`] but it cannot resist a roll moment about
 /// the line (`Mx = 0`); the ZMP is constrained to the segment `±length/2` along
-/// x via `My`. Wrench layout: `[Fx, Fy, Fz, Mx, My, Mz]` in the local frame.
+/// x via `My`. Wrench layout `[Fx, Fy, Fz, Mx, My, Mz]` with the force rows
+/// world-aligned (`LOCAL_WORLD_ALIGNED`, matching PlaCo) and the moment rows in
+/// the local frame; the unilateral cone is expressed in [`Self::r_world_surface`].
 pub struct LineContact {
     /// Contact frame index.
     pub frame_index: usize,
@@ -213,6 +215,9 @@ pub struct LineContact {
     pub weight_forces: f64,
     /// Soft weight to minimize moments.
     pub weight_moments: f64,
+    /// Rotation of the surface frame in the world, used for the unilateral cone
+    /// (identity = world-aligned).
+    pub r_world_surface: Matrix3<f64>,
     /// Whether this contact is active.
     pub active: bool,
     j: DMatrix<f64>,
@@ -227,6 +232,7 @@ impl LineContact {
             length: 0.0,
             weight_forces: 0.0,
             weight_moments: 0.0,
+            r_world_surface: Matrix3::identity(),
             active: true,
             j: DMatrix::zeros(0, 0),
         }
@@ -247,19 +253,32 @@ impl Contact for LineContact {
         self
     }
     fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
-        self.j = robot.frame_jacobian(self.frame_index, ReferenceFrame::Local)?;
+        // World-aligned force rows (like PlaCo's LWA position rows), local moment
+        // rows (like PlaCo's local orientation-task rows).
+        let j_lwa = robot.frame_jacobian(self.frame_index, ReferenceFrame::LocalWorldAligned)?;
+        let j_local = robot.frame_jacobian(self.frame_index, ReferenceFrame::Local)?;
+        let mut j = DMatrix::zeros(6, j_lwa.ncols());
+        j.rows_mut(0, 3).copy_from(&j_lwa.rows(0, 3));
+        j.rows_mut(3, 3).copy_from(&j_local.rows(3, 3));
+        self.j = j;
         Ok(())
     }
     fn add_constraints(&self, problem: &mut Problem, f: Variable) {
-        // f = [Fx, Fy, Fz, Mx, My, Mz] in the local frame.
+        // f = [Fx, Fy, Fz, Mx, My, Mz]: force world-aligned, moments local.
         let e = f.expr();
-        let (fx, fy, fz) = (e.slice(0, 1), e.slice(1, 1), e.slice(2, 1));
-        let (mx, my) = (e.slice(3, 1), e.slice(4, 1));
+        let my = e.slice(4, 1);
 
         // A line contact provides no roll moment about its own axis.
-        problem.add_constraint(mx.equal_scalar(0.0));
+        problem.add_constraint(e.slice(3, 1).equal_scalar(0.0));
 
         if self.unilateral {
+            // Express the force in the surface frame for the unilateral cone.
+            let f_surface = e
+                .slice(0, 3)
+                .left_multiply(&dmat3(&self.r_world_surface.transpose()));
+            let fx = f_surface.slice(0, 1);
+            let fy = f_surface.slice(1, 1);
+            let fz = f_surface.slice(2, 1);
             problem.add_constraint(fz.geq_scalar(0.0));
             // ZMP on the line: |My| <= l/2 Fz.
             let l = self.length / 2.0;
