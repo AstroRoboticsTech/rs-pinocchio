@@ -6,6 +6,7 @@
 //! layer. Requires the `ffi` feature (it drives Pinocchio through RobotWrapper).
 
 mod constraints;
+mod more_tasks;
 mod relative_tasks;
 mod solver;
 mod task;
@@ -15,6 +16,7 @@ pub use constraints::{
     CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
     KinematicsConstraint, YawConstraint,
 };
+pub use more_tasks::{GearTask, KineticEnergyRegularizationTask};
 pub use relative_tasks::{
     AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
     RelativePositionTask,

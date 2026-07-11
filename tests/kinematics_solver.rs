@@ -7,8 +7,9 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use rs_pinocchio::placo::kinematics::KinematicsSolver;
+use rs_pinocchio::placo::kinematics::{GearTask, KinematicsSolver};
 use rs_pinocchio::placo::model::RobotWrapper;
+use rs_pinocchio::placo::tools::Priority;
 
 const ARM_URDF: &str = r#"<?xml version="1.0"?>
 <robot name="test_arm">
@@ -110,6 +111,43 @@ fn ik_relative_position_reaches_target() {
     let reached = robot.t_a_b(base, tool).unwrap().translation.vector;
     let err = (reached - target).norm();
     assert!(err < 1e-4, "relative IK did not converge: error {err}");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn gear_task_couples_joints() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    let tool = robot.frame_index("tool").expect("tool frame");
+
+    let mut solver = KinematicsSolver::new(&robot);
+    solver.mask_fbase(true);
+
+    // Gear joint2 = 2 * joint1 (hard).
+    let gear = solver.add_gear_task();
+    solver
+        .task_mut::<GearTask>(gear)
+        .unwrap()
+        .set_gear("joint2", "joint1", 2.0);
+    solver.configure_task(gear, "gear", Priority::Hard, 1.0);
+
+    // Drive the tool somewhere reachable so the joints actually move.
+    solver.add_position_task(tool, nalgebra::Vector3::new(0.05, 0.05, 0.25));
+    solver.add_regularization_task(1e-6);
+
+    for _ in 0..200 {
+        solver.solve(&mut robot, true).expect("solve");
+    }
+
+    let j1 = robot.joint("joint1").unwrap();
+    let j2 = robot.joint("joint2").unwrap();
+    assert!(j1.abs() > 1e-3, "joint1 did not move: {j1}");
+    assert!(
+        (j2 - 2.0 * j1).abs() < 1e-4,
+        "gear broken: j2={j2}, 2*j1={}",
+        2.0 * j1
+    );
     let _ = std::fs::remove_file(&path);
 }
 

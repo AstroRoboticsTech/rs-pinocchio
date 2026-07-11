@@ -8,6 +8,7 @@ use super::constraints::{
     CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
     KinematicsConstraint, YawConstraint,
 };
+use super::more_tasks::{GearTask, KineticEnergyRegularizationTask};
 use super::relative_tasks::{
     AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
     RelativePositionTask,
@@ -249,6 +250,24 @@ impl KinematicsSolver {
     pub fn add_regularization_task(&mut self, magnitude: f64) -> TaskId {
         let id = self.push(Box::new(RegularizationTask::new(magnitude)));
         self.configure_task(id, "regularization", Priority::Soft, 1.0);
+        id
+    }
+
+    /// Adds an (empty) gear task coupling joints with ratios.
+    pub fn add_gear_task(&mut self) -> TaskId {
+        self.push(Box::new(GearTask::new()))
+    }
+
+    /// Adds a kinetic-energy regularization task (requires
+    /// [`KinematicsSolver::dt`]). Soft, with the given weight.
+    pub fn add_kinetic_energy_regularization_task(&mut self, magnitude: f64) -> TaskId {
+        let id = self.push(Box::new(KineticEnergyRegularizationTask::new()));
+        self.configure_task(
+            id,
+            "kinetic_energy_regularization",
+            Priority::Soft,
+            magnitude,
+        );
         id
     }
 
