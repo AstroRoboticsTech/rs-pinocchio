@@ -9,6 +9,7 @@ use nalgebra::{DVector, Matrix3};
 
 use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact};
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
+use super::relative_tasks::RelativePositionTask;
 use super::task::DynamicsTask;
 use super::tasks::{JointsTask, PositionTask};
 use crate::error::{Error, Result};
@@ -182,6 +183,18 @@ impl DynamicsSolver {
     /// Adds a CoM task.
     pub fn add_com_task(&mut self, target_world: nalgebra::Vector3<f64>) -> TaskId {
         self.push_task(Box::new(CoMTask::new(target_world)))
+    }
+
+    /// Adds a relative-position task (position of `frame_b` in `frame_a`).
+    pub fn add_relative_position_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        target: nalgebra::Vector3<f64>,
+    ) -> TaskId {
+        self.push_task(Box::new(RelativePositionTask::new(
+            frame_a, frame_b, target,
+        )))
     }
 
     /// Adds an (empty) torque task.

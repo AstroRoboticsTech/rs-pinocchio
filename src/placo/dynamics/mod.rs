@@ -8,12 +8,14 @@
 
 mod contacts;
 mod more_tasks;
+mod relative_tasks;
 mod solver;
 mod task;
 mod tasks;
 
 pub use contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact};
 pub use more_tasks::{CoMTask, OrientationTask, TargetTau, TorqueTask};
+pub use relative_tasks::RelativePositionTask;
 pub use solver::{ContactId, DynamicsResult, DynamicsSolver, FrameTaskHandle, TaskId};
 pub use task::{DynamicsTask, TaskBase};
 pub use tasks::{JointsTask, PositionTask};
