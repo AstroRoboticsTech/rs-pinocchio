@@ -9,6 +9,11 @@ keywords = ["pinocchio", "placo", "robotics", "kinematics", "control"]
 categories = ["science::robotics", "api-bindings"]
 readme = "README.md"
 links = "pinocchio_shim"
+# The vendored Pinocchio source (git submodules) is a git-checkout convenience for
+# the self-contained build; it must not ship in the published crate (it is ~45 MB
+# and would blow the crates.io size limit). Consumers of the published `ffi`
+# feature use a system Pinocchio (pkg-config / PINOCCHIO_PREFIX / ROS).
+exclude = ["/third_party", "/.gitmodules"]
 
 [dependencies]
 nalgebra = "0.33"

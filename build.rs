@@ -59,16 +59,28 @@ fn main() {
         }
     }
 
-    // 4. Vendored source build (built once into third_party/install, then cached).
-    let prefix = build_vendored();
-    if !link_prefix(&prefix, &mut include_paths) {
-        panic!(
-            "vendored Pinocchio build did not produce a usable prefix at {}",
-            prefix.display()
-        );
+    // 4. Self-contained vendored source build — only in a git checkout that has
+    //    the `third_party/` submodules (the vendored source is excluded from the
+    //    published crate, so crates.io consumers land on the hint below).
+    if let Some(prefix) = vendored_prefix() {
+        if link_prefix(&prefix, &mut include_paths) {
+            compile_shim(&include_paths);
+            return;
+        }
     }
-    compile_shim(&include_paths);
+
+    panic!("{NOT_FOUND_HINT}");
 }
+
+const NOT_FOUND_HINT: &str = "\nPinocchio 4.1.0 not found.\n\
+     A published-crate `ffi` build needs a system Pinocchio. Install it, then set\n\
+     PINOCCHIO_PREFIX if it is in a non-standard prefix:\n\
+     \n  conda-forge:  conda install -c conda-forge pinocchio=4.1.0\n\
+     \n  robotpkg:     sudo apt install robotpkg-pinocchio\n\
+     \n  ROS 2:        sudo apt install ros-<distro>-pinocchio  &&  source /opt/ros/<distro>/setup.bash\n\
+     \nThen re-run `cargo build`, or set PINOCCHIO_PREFIX=/path/to/prefix.\n\
+     \nAlternatively, build from a git checkout with the vendored source:\n\
+     \n  git clone --recurse-submodules https://github.com/AstroRoboticsTech/rs-pinocchio\n";
 
 /// Adds Eigen's include dir (pkg-config `eigen3`, else the common fallback).
 fn add_eigen(include_paths: &mut Vec<PathBuf>) {
@@ -154,20 +166,38 @@ fn candidate_prefixes() -> Vec<PathBuf> {
     prefixes
 }
 
-/// Builds the vendored Pinocchio + URDF deps (collision off) into
-/// `third_party/install`, once. Returns the install prefix.
-fn build_vendored() -> PathBuf {
+/// Resolves a vendored-source install prefix, building it once if needed.
+///
+/// Returns `None` when the vendored source is neither built nor available and
+/// cannot be fetched — i.e. this is not a git checkout (a published crate, whose
+/// `third_party/` is excluded). Callers then fall back to the install hint.
+fn vendored_prefix() -> Option<PathBuf> {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let third_party = manifest.join("third_party");
     let prefix = third_party.join("install");
 
     // Already built (sentinel present)? Reuse it.
     if prefix.join("include/pinocchio/config.hpp").exists() {
-        return prefix;
+        return Some(prefix);
     }
 
-    ensure_submodules(&manifest, &third_party);
+    // Need the source. Use it if present, else init the submodules — but only in
+    // a git checkout that carries the submodule config.
+    if !third_party.join("pinocchio/CMakeLists.txt").exists() {
+        let is_git_checkout =
+            manifest.join(".gitmodules").exists() && manifest.join(".git").exists();
+        if !is_git_checkout {
+            return None;
+        }
+        ensure_submodules(&manifest, &third_party);
+    }
 
+    build_chain(&third_party, &prefix);
+    Some(prefix)
+}
+
+/// CMake-builds the vendored dependency chain (collision off) into `prefix`.
+fn build_chain(third_party: &Path, prefix: &Path) {
     let build_root = third_party.join("build");
     let cmake_common: Vec<String> = vec![
         "-GNinja".into(),
@@ -231,8 +261,6 @@ fn build_vendored() -> PathBuf {
             "-DGENERATE_PYTHON_STUBS=OFF",
         ],
     );
-
-    prefix
 }
 
 /// Checks out the vendored source submodules if they are not present.
