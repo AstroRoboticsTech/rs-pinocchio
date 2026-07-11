@@ -30,7 +30,7 @@ pub use kick::{make_trajectory as make_kick_trajectory, KickTrajectory};
 pub use lipm::{Lipm, LipmTrajectory};
 pub use parameters::{FootstepClipping, HumanoidParameters};
 pub use side::Side;
-pub use swing_foot::{SwingFoot, SwingFootQuintic};
+pub use swing_foot::{SwingFoot, SwingFootCubic, SwingFootQuintic};
 pub use walk_pattern_generator::{TrajectoryPart, WalkPatternGenerator, WalkTrajectory};
 #[cfg(feature = "ffi")]
 pub use walk_tasks::WalkTasks;

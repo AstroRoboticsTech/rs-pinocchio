@@ -96,17 +96,39 @@ impl CubicSpline {
 
     /// Position at time `t` (clamped to the spline's time range).
     pub fn pos(&mut self, t: f64) -> f64 {
-        self.interpolation(t, ValueType::Value)
+        self.build();
+        self.eval(t, ValueType::Value)
     }
 
     /// Velocity at time `t`.
     pub fn vel(&mut self, t: f64) -> f64 {
-        self.interpolation(t, ValueType::Speed)
+        self.build();
+        self.eval(t, ValueType::Speed)
     }
 
     /// Acceleration at time `t`.
     pub fn acc(&mut self, t: f64) -> f64 {
-        self.interpolation(t, ValueType::Acceleration)
+        self.build();
+        self.eval(t, ValueType::Acceleration)
+    }
+
+    /// Forces the internal cubic segments to be (re)computed, so the immutable
+    /// `*_at` evaluators can be called afterwards. Idempotent.
+    pub fn build(&mut self) {
+        if self.dirty {
+            self.compute_splines();
+            self.dirty = false;
+        }
+    }
+
+    /// Position at `t` without rebuilding. Call [`build`](Self::build) first.
+    pub fn value_at(&self, t: f64) -> f64 {
+        self.eval(t, ValueType::Value)
+    }
+
+    /// Velocity at `t` without rebuilding. Call [`build`](Self::build) first.
+    pub fn speed_at(&self, t: f64) -> f64 {
+        self.eval(t, ValueType::Speed)
     }
 
     /// The knots currently in the spline.
@@ -114,12 +136,7 @@ impl CubicSpline {
         &self.points
     }
 
-    fn interpolation(&mut self, mut t: f64, type_: ValueType) -> f64 {
-        if self.dirty {
-            self.compute_splines();
-            self.dirty = false;
-        }
-
+    fn eval(&self, mut t: f64, type_: ValueType) -> f64 {
         if self.points.is_empty() {
             return 0.0;
         }

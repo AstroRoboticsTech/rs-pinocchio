@@ -1,6 +1,8 @@
-//! Swing-foot trajectories (PlaCo `SwingFoot`, `SwingFootQuintic`).
+//! Swing-foot trajectories (PlaCo `SwingFoot`, `SwingFootCubic`, `SwingFootQuintic`).
 
 use nalgebra::{DMatrix, DVector, Matrix4, Vector3, Vector4};
+
+use crate::placo::tools::CubicSpline;
 
 fn pos_coeffs(t: f64) -> Vector4<f64> {
     Vector4::new(t * t * t, t * t, t, 1.0)
@@ -107,6 +109,95 @@ impl SwingFoot {
     pub fn vel(&self, t: f64) -> Vector3<f64> {
         let tau = t - self.t_start;
         3.0 * self.a * tau.powi(2) + 2.0 * self.b * tau + self.c
+    }
+}
+
+/// Cubic swing foot used by the walk pattern generator (PlaCo `SwingFootCubic`).
+///
+/// Unlike [`SwingFoot`], each axis is a piecewise-cubic spline: the z apex is a
+/// pair of `height` knots whose window is set by `rise_ratio`, and the swing
+/// supports a nonzero start velocity plus an already-`elapsed` fraction, so a
+/// replan can continue the flying foot's swing without a velocity discontinuity.
+#[derive(Clone, Debug)]
+pub struct SwingFootCubic {
+    x: CubicSpline,
+    y: CubicSpline,
+    z: CubicSpline,
+    /// Time the (possibly partial) swing starts.
+    pub t_start: f64,
+    /// The full (virtual) swing duration, ignoring `elapsed_ratio`.
+    pub virt_duration: f64,
+}
+
+impl SwingFootCubic {
+    /// Builds a swing from `start` (moving at `start_vel`) to `target`.
+    ///
+    /// `virt_duration` is the full swing time; `elapsed_ratio` (0 for a fresh
+    /// swing) is how much of it is already behind us, so the apex windows land
+    /// at the same absolute times on a replan. `rise_ratio` sets the z-apex
+    /// window as a fraction of the half-duration.
+    #[allow(clippy::too_many_arguments)]
+    pub fn make_trajectory(
+        t_start: f64,
+        virt_duration: f64,
+        height: f64,
+        rise_ratio: f64,
+        start: Vector3<f64>,
+        target: Vector3<f64>,
+        elapsed_ratio: f64,
+        start_vel: Vector3<f64>,
+    ) -> SwingFootCubic {
+        let mut x = CubicSpline::new(false);
+        let mut y = CubicSpline::new(false);
+        let mut z = CubicSpline::new(false);
+
+        x.add_point(t_start, start.x, start_vel.x);
+        y.add_point(t_start, start.y, start_vel.y);
+        z.add_point(t_start, start.z, start_vel.z);
+
+        let half_duration = virt_duration / 2.0;
+        let virt_t_start = t_start - elapsed_ratio * virt_duration;
+        let t_end = t_start + (1.0 - elapsed_ratio) * virt_duration;
+
+        let mid = if rise_ratio > 0.0 {
+            vec![
+                virt_t_start + half_duration - half_duration * rise_ratio,
+                virt_t_start + half_duration + half_duration * rise_ratio,
+            ]
+        } else {
+            vec![virt_t_start + half_duration]
+        };
+        for t_i in mid {
+            if t_i > t_start {
+                z.add_point(t_i, height, 0.0);
+            }
+        }
+
+        x.add_point(t_end, target.x, 0.0);
+        y.add_point(t_end, target.y, 0.0);
+        z.add_point(t_end, target.z, 0.0);
+
+        x.build();
+        y.build();
+        z.build();
+
+        SwingFootCubic {
+            x,
+            y,
+            z,
+            t_start,
+            virt_duration,
+        }
+    }
+
+    /// Position at time `t`.
+    pub fn pos(&self, t: f64) -> Vector3<f64> {
+        Vector3::new(self.x.value_at(t), self.y.value_at(t), self.z.value_at(t))
+    }
+
+    /// Velocity at time `t`.
+    pub fn vel(&self, t: f64) -> Vector3<f64> {
+        Vector3::new(self.x.speed_at(t), self.y.speed_at(t), self.z.speed_at(t))
     }
 }
 
@@ -246,6 +337,59 @@ mod tests {
         assert!(traj.vel(1.0).xy().norm() < 1e-9);
         // Foot rises above ground mid-swing.
         assert!(traj.pos(0.25).z > 0.04);
+    }
+
+    #[test]
+    fn swing_cubic_hits_endpoints_and_rise_ratio_apex() {
+        let start = Vector3::new(0.0, 0.0, 0.0);
+        let target = Vector3::new(0.2, 0.1, 0.0);
+        let traj = SwingFootCubic::make_trajectory(
+            0.0,
+            1.0,
+            0.05,
+            0.2,
+            start,
+            target,
+            0.0,
+            Vector3::zeros(),
+        );
+        assert!((traj.pos(0.0) - start).norm() < 1e-9);
+        assert!((traj.pos(1.0) - target).norm() < 1e-9);
+        // Zero endpoint velocities.
+        assert!(traj.vel(0.0).norm() < 1e-9);
+        assert!(traj.vel(1.0).norm() < 1e-9);
+        // rise_ratio = 0.2 puts the height knots at 40% and 60% (not 25%/75%),
+        // with a flat plateau between them.
+        assert!((traj.pos(0.4).z - 0.05).abs() < 1e-9);
+        assert!((traj.pos(0.6).z - 0.05).abs() < 1e-9);
+        assert!((traj.pos(0.5).z - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn swing_cubic_respects_start_velocity() {
+        let start = Vector3::new(0.0, 0.0, 0.02);
+        let start_vel = Vector3::new(0.1, -0.05, 0.0);
+        let target = Vector3::new(0.2, 0.0, 0.0);
+        let traj =
+            SwingFootCubic::make_trajectory(0.0, 1.0, 0.05, 0.2, start, target, 0.0, start_vel);
+        assert!((traj.pos(0.0) - start).norm() < 1e-9);
+        assert!((traj.vel(0.0) - start_vel).norm() < 1e-9);
+    }
+
+    #[test]
+    fn swing_cubic_elapsed_ratio_lands_early() {
+        // 40% already elapsed: remaining span is 0.6, so it lands at t=2.6, not 3.0.
+        let traj = SwingFootCubic::make_trajectory(
+            2.0,
+            1.0,
+            0.05,
+            0.2,
+            Vector3::new(0.05, 0.0, 0.03),
+            Vector3::new(0.2, 0.0, 0.0),
+            0.4,
+            Vector3::zeros(),
+        );
+        assert!((traj.pos(2.6) - Vector3::new(0.2, 0.0, 0.0)).norm() < 1e-9);
     }
 
     #[test]

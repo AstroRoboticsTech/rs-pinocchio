@@ -14,7 +14,7 @@ use nalgebra::{Isometry3, Translation3, UnitQuaternion, Vector2, Vector3};
 use super::footsteps::Support;
 use super::parameters::HumanoidParameters;
 use super::side::Side;
-use super::swing_foot::SwingFoot;
+use super::swing_foot::SwingFootCubic;
 use crate::error::{Error, Result};
 use crate::placo::problem::{in_polygon_xy, ConstraintPriority, Problem};
 use crate::placo::tools::{frame_yaw, CubicSpline};
@@ -32,7 +32,7 @@ pub struct TrajectoryPart {
     /// The CoM trajectory over this part.
     pub com_trajectory: LipmTrajectory,
     /// The swing-foot trajectory (only for single supports).
-    pub swing_trajectory: Option<SwingFoot>,
+    pub swing_trajectory: Option<SwingFootCubic>,
 }
 
 /// A planned walk trajectory: a sequence of [`TrajectoryPart`]s plus foot/trunk
@@ -205,9 +205,37 @@ impl WalkTrajectory {
         self.t_world_foot(Side::Right, t)
     }
 
+    /// World velocity of `side`'s foot at time `t` (zero unless it is swinging).
+    pub fn v_world_foot(&self, side: Side, t: f64) -> Vector3<f64> {
+        let part = self.find_part(t);
+        if self.is_flying(side, t) {
+            part.swing_trajectory
+                .as_ref()
+                .map(|s| s.vel(t))
+                .unwrap_or_else(Vector3::zeros)
+        } else {
+            Vector3::zeros()
+        }
+    }
+
+    /// Yaw of `side`'s foot at time `t`.
+    pub fn yaw_world_foot(&mut self, side: Side, t: f64) -> f64 {
+        self.foot_yaw_mut(side).pos(t)
+    }
+
+    /// Yaw rate of `side`'s foot at time `t`.
+    pub fn v_yaw_world_foot(&mut self, side: Side, t: f64) -> f64 {
+        self.foot_yaw_mut(side).vel(t)
+    }
+
     /// Trunk yaw in the world at time `t`.
     pub fn yaw_world_trunk(&mut self, t: f64) -> f64 {
         self.trunk_yaw.pos(t)
+    }
+
+    /// Trunk yaw rate in the world at time `t`.
+    pub fn v_yaw_world_trunk(&mut self, t: f64) -> f64 {
+        self.trunk_yaw.vel(t)
     }
 
     /// Trunk orientation in the world at time `t`
@@ -483,20 +511,26 @@ impl WalkPatternGenerator {
     ) {
         let first_support = trajectory.parts[0].support.clone();
         trajectory.add_supports(trajectory.t_start, &first_support);
-        let trunk_yaw0 = match old.as_deref_mut() {
-            // Continue the trunk yaw from the old trajectory.
-            Some(o) => o.yaw_world_trunk(trajectory.t_start),
-            None => frame_yaw(
-                &first_support
-                    .frame()
-                    .rotation
-                    .to_rotation_matrix()
-                    .into_inner(),
+        let (trunk_yaw0, trunk_dyaw0) = match old.as_deref_mut() {
+            // Continue the trunk yaw (position and velocity) from the old trajectory.
+            Some(o) => (
+                o.yaw_world_trunk(trajectory.t_start),
+                o.v_yaw_world_trunk(trajectory.t_start),
+            ),
+            None => (
+                frame_yaw(
+                    &first_support
+                        .frame()
+                        .rotation
+                        .to_rotation_matrix()
+                        .into_inner(),
+                ),
+                0.0,
             ),
         };
         trajectory
             .trunk_yaw
-            .add_point(trajectory.t_start, trunk_yaw0, 0.0);
+            .add_point(trajectory.t_start, trunk_yaw0, trunk_dyaw0);
 
         for i in 0..trajectory.parts.len() {
             if trajectory.parts[i].support.footsteps.len() == 1 {
@@ -523,40 +557,66 @@ impl WalkPatternGenerator {
         i: usize,
         old: Option<&mut WalkTrajectory>,
     ) {
-        let part = &trajectory.parts[i];
-        let (t_start, t_end) = (part.t_start, part.t_end);
-        let support = part.support.clone();
+        let (t_start, t_end, support) = {
+            let part = &trajectory.parts[i];
+            (part.t_start, part.t_end, part.support.clone())
+        };
         let flying_side = support.footsteps[0].side.other();
         // Next part's footstep for the flying side is the landing target.
         let t_world_end = trajectory.parts[i + 1].support.footstep_frame(flying_side);
+        let target = t_world_end.translation.vector;
 
         let virt_duration = self.support_default_duration(&support) * support.time_ratio;
-        let start = if i == 0 {
-            match old {
-                // Replan: continue the swing from the old trajectory's flying foot.
-                Some(o) => {
-                    o.t_world_foot(flying_side, trajectory.t_start)
+        let rise_ratio = self.parameters.walk_foot_rise_ratio;
+        let height = self.parameters.walk_foot_height;
+
+        let swing = match (i, old) {
+            // Replan: continue the flying foot's swing (position and velocity) from
+            // the old trajectory, accounting for the already-elapsed fraction.
+            (0, Some(o)) => {
+                let t0 = trajectory.t_start;
+                let start = o.t_world_foot(flying_side, t0).translation.vector;
+                let start_vel = o.v_world_foot(flying_side, t0);
+                // Seed the flying-foot yaw spline with the old position and velocity.
+                let yaw0 = o.yaw_world_foot(flying_side, t0);
+                let dyaw0 = o.v_yaw_world_foot(flying_side, t0);
+                trajectory
+                    .foot_yaw_mut(flying_side)
+                    .add_point(t0, yaw0, dyaw0);
+                SwingFootCubic::make_trajectory(
+                    t_start,
+                    virt_duration,
+                    height,
+                    rise_ratio,
+                    start,
+                    target,
+                    support.elapsed_ratio,
+                    start_vel,
+                )
+            }
+            _ => {
+                let start = if i == 0 {
+                    // No previous part and no old trajectory: degenerate start = target.
+                    target
+                } else {
+                    trajectory.parts[i - 1]
+                        .support
+                        .footstep_frame(flying_side)
                         .translation
                         .vector
-                }
-                // No previous part and no old trajectory: degenerate start = target.
-                None => t_world_end.translation.vector,
+                };
+                SwingFootCubic::make_trajectory(
+                    t_start,
+                    virt_duration,
+                    height,
+                    rise_ratio,
+                    start,
+                    target,
+                    0.0,
+                    Vector3::zeros(),
+                )
             }
-        } else {
-            trajectory.parts[i - 1]
-                .support
-                .footstep_frame(flying_side)
-                .translation
-                .vector
         };
-
-        let swing = SwingFoot::make_trajectory(
-            t_start,
-            t_start + virt_duration,
-            self.parameters.walk_foot_height,
-            start,
-            t_world_end.translation.vector,
-        );
         trajectory.parts[i].swing_trajectory = Some(swing);
 
         let end_yaw = frame_yaw(&t_world_end.rotation.to_rotation_matrix().into_inner());
