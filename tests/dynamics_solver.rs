@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use nalgebra::Matrix3;
 
-use rs_pinocchio::placo::dynamics::DynamicsSolver;
+use rs_pinocchio::placo::dynamics::{DynamicsSolver, LineContact};
 use rs_pinocchio::placo::model::RobotWrapper;
 use rs_pinocchio::placo::tools::Priority;
 
@@ -145,5 +145,58 @@ fn relative_orientation_task_drives_legs() {
     assert!(result.qdd.iter().all(|v| v.is_finite()));
     // The task pushes the legs apart, so the solve is not trivially zero.
     assert!(result.qdd.norm() > 1e-6, "qdd norm {}", result.qdd.norm());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn line_contacts_balance_gravity() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load biped");
+    robot.update_kinematics().expect("update kinematics");
+
+    let left = robot.frame_index("left_foot").expect("left foot");
+    let right = robot.frame_index("right_foot").expect("right foot");
+    let total_mass = robot.total_mass();
+
+    let lt = robot.t_world_frame(left).unwrap();
+    let rt = robot.t_world_frame(right).unwrap();
+
+    let mut solver = DynamicsSolver::new(&robot);
+    solver.gravity_only = true;
+
+    // Hold each foot's full pose (position + orientation).
+    let lh = solver.add_frame_task(left, lt);
+    solver.configure_task(lh.position, Priority::Hard, 1.0);
+    solver.configure_task(lh.orientation, Priority::Hard, 1.0);
+    let rh = solver.add_frame_task(right, rt);
+    solver.configure_task(rh.position, Priority::Hard, 1.0);
+    solver.configure_task(rh.orientation, Priority::Hard, 1.0);
+
+    let lc = solver.add_line_contact(left);
+    let rc = solver.add_line_contact(right);
+    solver.contact_mut::<LineContact>(lc).unwrap().length = 0.1;
+    solver.contact_mut::<LineContact>(rc).unwrap().length = 0.1;
+
+    let result = solver.solve(&mut robot, false).expect("dynamics solve");
+    assert!(result.success);
+    assert!(result.tau.iter().all(|v| v.is_finite()));
+    assert!(
+        result.tau.rows(0, 6).norm() < 1e-6,
+        "fbase torque: {}",
+        result.tau.rows(0, 6).norm()
+    );
+
+    let wl = solver.contact_wrench(lc).unwrap();
+    let wr = solver.contact_wrench(rc).unwrap();
+    // Vertical forces carry the full weight.
+    let total_fz = wl[2] + wr[2];
+    assert!(
+        (total_fz - total_mass * 9.81).abs() < 1e-2,
+        "vertical force {total_fz} != weight {}",
+        total_mass * 9.81
+    );
+    // A line contact resists no roll moment about its own axis.
+    assert!(wl[3].abs() < 1e-9 && wr[3].abs() < 1e-9, "Mx not zero");
     let _ = std::fs::remove_file(&path);
 }

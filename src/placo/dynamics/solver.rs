@@ -7,7 +7,9 @@
 
 use nalgebra::{DVector, Matrix3};
 
-use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact, PuppetContact};
+use super::contacts::{
+    Contact, Contact6D, ExternalWrenchContact, LineContact, PointContact, PuppetContact,
+};
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
 use super::relative_tasks::{RelativeOrientationTask, RelativePositionTask};
 use super::task::DynamicsTask;
@@ -276,6 +278,14 @@ impl DynamicsSolver {
     pub fn add_planar_contact(&mut self, frame_index: usize) -> ContactId {
         self.contacts
             .push(Box::new(Contact6D::new(frame_index, true)));
+        self.contacts.len() - 1
+    }
+
+    /// Adds a unilateral line ("knife-edge") contact along the frame's local
+    /// x-axis (set its `length` via [`DynamicsSolver::contact_mut`]).
+    pub fn add_line_contact(&mut self, frame_index: usize) -> ContactId {
+        self.contacts
+            .push(Box::new(LineContact::new(frame_index, true)));
         self.contacts.len() - 1
     }
 

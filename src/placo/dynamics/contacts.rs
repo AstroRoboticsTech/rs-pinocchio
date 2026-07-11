@@ -196,6 +196,96 @@ impl Contact for Contact6D {
     }
 }
 
+/// A 5-DoF line ("knife-edge") contact along the frame's local x-axis (PlaCo
+/// `LineContact`). Like [`Contact6D`] but it cannot resist a roll moment about
+/// the line (`Mx = 0`); the ZMP is constrained to the segment `±length/2` along
+/// x via `My`. Wrench layout: `[Fx, Fy, Fz, Mx, My, Mz]` in the local frame.
+pub struct LineContact {
+    /// Contact frame index.
+    pub frame_index: usize,
+    /// Whether the contact is unilateral (line ZMP + friction limits).
+    pub unilateral: bool,
+    /// Friction coefficient.
+    pub mu: f64,
+    /// Contact length (x) for the ZMP segment [m].
+    pub length: f64,
+    /// Soft weight to minimize forces.
+    pub weight_forces: f64,
+    /// Soft weight to minimize moments.
+    pub weight_moments: f64,
+    /// Whether this contact is active.
+    pub active: bool,
+    j: DMatrix<f64>,
+}
+
+impl LineContact {
+    pub(crate) fn new(frame_index: usize, unilateral: bool) -> Self {
+        Self {
+            frame_index,
+            unilateral,
+            mu: 1.0,
+            length: 0.0,
+            weight_forces: 0.0,
+            weight_moments: 0.0,
+            active: true,
+            j: DMatrix::zeros(0, 0),
+        }
+    }
+}
+
+impl Contact for LineContact {
+    fn active(&self) -> bool {
+        self.active
+    }
+    fn size(&self) -> usize {
+        6
+    }
+    fn jacobian(&self) -> &DMatrix<f64> {
+        &self.j
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        self.j = robot.frame_jacobian(self.frame_index, ReferenceFrame::Local)?;
+        Ok(())
+    }
+    fn add_constraints(&self, problem: &mut Problem, f: Variable) {
+        // f = [Fx, Fy, Fz, Mx, My, Mz] in the local frame.
+        let e = f.expr();
+        let (fx, fy, fz) = (e.slice(0, 1), e.slice(1, 1), e.slice(2, 1));
+        let (mx, my) = (e.slice(3, 1), e.slice(4, 1));
+
+        // A line contact provides no roll moment about its own axis.
+        problem.add_constraint(mx.equal_scalar(0.0));
+
+        if self.unilateral {
+            problem.add_constraint(fz.geq_scalar(0.0));
+            // ZMP on the line: |My| <= l/2 Fz.
+            let l = self.length / 2.0;
+            problem.add_constraint(my.leq(&fz.scale(l)));
+            problem.add_constraint(my.geq(&fz.scale(-l)));
+            // Friction: |Fx|, |Fy| <= mu Fz.
+            problem.add_constraint(fx.leq(&fz.scale(self.mu)));
+            problem.add_constraint(fx.geq(&fz.scale(-self.mu)));
+            problem.add_constraint(fy.leq(&fz.scale(self.mu)));
+            problem.add_constraint(fy.geq(&fz.scale(-self.mu)));
+        }
+
+        if self.weight_forces > 0.0 {
+            problem
+                .add_constraint(e.slice(0, 3).equal_vector(nalgebra::DVector::zeros(3)))
+                .configure(ConstraintPriority::Soft, self.weight_forces);
+        }
+        if self.weight_moments > 0.0 {
+            // Only My, Mz are free moments (Mx is fixed to 0 above).
+            problem
+                .add_constraint(e.slice(4, 2).equal_vector(nalgebra::DVector::zeros(2)))
+                .configure(ConstraintPriority::Soft, self.weight_moments);
+        }
+    }
+}
+
 /// A known external wrench applied at a frame (PlaCo `ExternalWrenchContact`).
 ///
 /// The 6-DoF "force" is fixed to `w_ext` rather than optimized.
