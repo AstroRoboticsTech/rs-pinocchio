@@ -4,6 +4,8 @@
 //! Rust and needs no Pinocchio. Higher layers (the walk pattern generator and
 //! `HumanoidRobot`) will additionally require the `ffi` feature.
 
+#[cfg(feature = "ffi")]
+mod dummy_walk;
 mod footsteps;
 #[cfg(feature = "ffi")]
 mod humanoid_robot;
@@ -15,6 +17,8 @@ mod walk_pattern_generator;
 #[cfg(feature = "ffi")]
 mod walk_tasks;
 
+#[cfg(feature = "ffi")]
+pub use dummy_walk::DummyWalk;
 pub use footsteps::{
     make_supports, Footstep, FootstepsPlanner, FootstepsPlannerNaive, FootstepsPlannerRepetitive,
     Support,

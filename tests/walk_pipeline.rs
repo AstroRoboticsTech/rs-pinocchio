@@ -9,10 +9,11 @@ use std::path::PathBuf;
 
 use nalgebra::{Isometry3, Vector3};
 use rs_pinocchio::placo::humanoid::{
-    make_supports, FootstepsPlanner, FootstepsPlannerRepetitive, HumanoidParameters, HumanoidRobot,
-    Side, WalkPatternGenerator, WalkTasks,
+    make_supports, DummyWalk, FootstepsPlanner, FootstepsPlannerRepetitive, HumanoidParameters,
+    HumanoidRobot, Side, WalkPatternGenerator, WalkTasks,
 };
 use rs_pinocchio::placo::kinematics::KinematicsSolver;
+use rs_pinocchio::placo::model::RobotWrapper;
 
 const BIPED_URDF: &str = r#"<?xml version="1.0"?>
 <robot name="biped">
@@ -106,5 +107,32 @@ fn full_walk_pipeline_runs() {
     assert!(com_end.x > com_start.x, "walk CoM did not advance");
     // The robot state stayed finite through the tracking loop.
     assert!(robot.robot.state.q.iter().all(|v| v.is_finite()));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn dummy_walk_steps_forward() {
+    let path = write_fixture();
+    let robot = RobotWrapper::from_urdf(&path).expect("load biped");
+    let params = HumanoidParameters::new();
+
+    let mut dw = DummyWalk::new(robot, params).expect("dummy walk");
+    let x0 = dw.t_world_next.translation.x;
+
+    // Walk a few forward steps, marching the phase each time.
+    for _ in 0..4 {
+        dw.next_step(0.05, 0.0, 0.0);
+        for i in 0..=10 {
+            dw.update(i as f64 / 10.0).expect("update");
+        }
+    }
+
+    // The flying-foot target advanced forward and the state stayed finite.
+    assert!(
+        dw.t_world_next.translation.x > x0 + 0.05,
+        "dummy walk did not advance"
+    );
+    assert!(dw.robot.state.q.iter().all(|v| v.is_finite()));
     let _ = std::fs::remove_file(&path);
 }
