@@ -9,6 +9,7 @@ mod dummy_walk;
 mod footsteps;
 #[cfg(feature = "ffi")]
 mod humanoid_robot;
+mod kick;
 mod lipm;
 mod parameters;
 mod side;
@@ -25,6 +26,7 @@ pub use footsteps::{
 };
 #[cfg(feature = "ffi")]
 pub use humanoid_robot::HumanoidRobot;
+pub use kick::{make_trajectory as make_kick_trajectory, KickTrajectory};
 pub use lipm::{Lipm, LipmTrajectory};
 pub use parameters::{FootstepClipping, HumanoidParameters};
 pub use side::Side;
