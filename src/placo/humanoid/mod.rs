@@ -11,6 +11,7 @@ mod lipm;
 mod parameters;
 mod side;
 mod swing_foot;
+mod walk_pattern_generator;
 
 pub use footsteps::{
     make_supports, Footstep, FootstepsPlanner, FootstepsPlannerNaive, FootstepsPlannerRepetitive,
@@ -22,3 +23,4 @@ pub use lipm::{Lipm, LipmTrajectory};
 pub use parameters::{FootstepClipping, HumanoidParameters};
 pub use side::Side;
 pub use swing_foot::{SwingFoot, SwingFootQuintic};
+pub use walk_pattern_generator::{TrajectoryPart, WalkPatternGenerator, WalkTrajectory};
