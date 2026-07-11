@@ -14,6 +14,11 @@
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/center-of-mass.hpp>
+#include <pinocchio/algorithm/centroidal.hpp>
+#include <pinocchio/algorithm/crba.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
 #include <Eigen/Geometry>
@@ -142,6 +147,267 @@ void PinocchioModel::frame_jacobian(std::int64_t id, std::uint8_t reference_fram
       out[static_cast<std::size_t>(r * nv + c)] = J(r, c);
     }
   }
+}
+
+// --- RobotWrapper-supporting primitives --------------------------------------
+
+namespace {
+// Row-major copy of an Eigen matrix into a Rust slice (out.size() == rows*cols).
+template <typename Derived>
+void fill_row_major(rust::Slice<double> out, const Eigen::MatrixBase<Derived> &m) {
+  const Eigen::Index rows = m.rows();
+  const Eigen::Index cols = m.cols();
+  if (static_cast<Eigen::Index>(out.size()) != rows * cols) {
+    throw std::invalid_argument("output slice size does not match matrix size");
+  }
+  std::size_t idx = 0;
+  for (Eigen::Index r = 0; r < rows; ++r) {
+    for (Eigen::Index c = 0; c < cols; ++c) {
+      out[idx++] = m(r, c);
+    }
+  }
+}
+
+void copy_vector(rust::Slice<double> out, const Eigen::VectorXd &v) {
+  if (static_cast<Eigen::Index>(out.size()) != v.size()) {
+    throw std::invalid_argument("output slice size does not match vector size");
+  }
+  for (Eigen::Index k = 0; k < v.size(); ++k) {
+    out[static_cast<std::size_t>(k)] = v[k];
+  }
+}
+
+Eigen::Map<const Eigen::VectorXd> map_q(const pinocchio::Model &model,
+                                        rust::Slice<const double> q) {
+  if (static_cast<Eigen::Index>(q.size()) != model.nq) {
+    throw std::invalid_argument("q length does not match model.nq");
+  }
+  return Eigen::Map<const Eigen::VectorXd>(q.data(), static_cast<Eigen::Index>(q.size()));
+}
+
+Eigen::Map<const Eigen::VectorXd> map_v(const pinocchio::Model &model,
+                                        rust::Slice<const double> v) {
+  if (static_cast<Eigen::Index>(v.size()) != model.nv) {
+    throw std::invalid_argument("v length does not match model.nv");
+  }
+  return Eigen::Map<const Eigen::VectorXd>(v.data(), static_cast<Eigen::Index>(v.size()));
+}
+
+pinocchio::ReferenceFrame to_reference(std::uint8_t code) {
+  switch (code) {
+  case 0:
+    return pinocchio::LOCAL;
+  case 1:
+    return pinocchio::WORLD;
+  case 2:
+    return pinocchio::LOCAL_WORLD_ALIGNED;
+  default:
+    throw std::invalid_argument("unknown reference_frame");
+  }
+}
+} // namespace
+
+void PinocchioModel::update_kinematics(rust::Slice<const double> q,
+                                       rust::Slice<const double> v) {
+  auto qv = map_q(impl_->model, q);
+  auto vv = map_v(impl_->model, v);
+  pinocchio::framesForwardKinematics(impl_->model, impl_->data, qv);
+  pinocchio::computeJointJacobians(impl_->model, impl_->data, qv);
+  pinocchio::computeJointJacobiansTimeVariation(impl_->model, impl_->data, qv, vv);
+  pinocchio::updateFramePlacements(impl_->model, impl_->data);
+}
+
+void PinocchioModel::frame_jacobian_time_variation(std::int64_t id,
+                                                   std::uint8_t reference_frame,
+                                                   rust::Slice<double> out) const {
+  const Eigen::Index nv = impl_->model.nv;
+  if (id < 0 || static_cast<std::size_t>(id) >= impl_->model.frames.size()) {
+    throw std::out_of_range("frame_jacobian_time_variation: frame id out of range");
+  }
+  pinocchio::Data::Matrix6x J(6, nv);
+  J.setZero();
+  pinocchio::getFrameJacobianTimeVariation(impl_->model, impl_->data,
+                                           static_cast<pinocchio::FrameIndex>(id),
+                                           to_reference(reference_frame), J);
+  fill_row_major(out, J);
+}
+
+void PinocchioModel::joint_jacobian(std::int64_t joint_id, std::uint8_t reference_frame,
+                                    rust::Slice<double> out) const {
+  const Eigen::Index nv = impl_->model.nv;
+  if (joint_id < 0 || static_cast<std::size_t>(joint_id) >= impl_->model.joints.size()) {
+    throw std::out_of_range("joint_jacobian: joint id out of range");
+  }
+  pinocchio::Data::Matrix6x J(6, nv);
+  J.setZero();
+  pinocchio::getJointJacobian(impl_->model, impl_->data,
+                              static_cast<pinocchio::JointIndex>(joint_id),
+                              to_reference(reference_frame), J);
+  fill_row_major(out, J);
+}
+
+void PinocchioModel::neutral(rust::Slice<double> out) const {
+  copy_vector(out, pinocchio::neutral(impl_->model));
+}
+
+void PinocchioModel::integrate(rust::Slice<const double> q, rust::Slice<const double> v,
+                               rust::Slice<double> out) const {
+  auto qv = map_q(impl_->model, q);
+  auto vv = map_v(impl_->model, v);
+  copy_vector(out, pinocchio::integrate(impl_->model, qv, vv));
+}
+
+void PinocchioModel::center_of_mass(rust::Slice<const double> q, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  pinocchio::centerOfMass(impl_->model, impl_->data, qv);
+  const Eigen::Vector3d &com = impl_->data.com[0];
+  if (out.size() != 3) {
+    throw std::invalid_argument("center_of_mass: out length must be 3");
+  }
+  out[0] = com.x();
+  out[1] = com.y();
+  out[2] = com.z();
+}
+
+void PinocchioModel::com_jacobian(rust::Slice<const double> q, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  fill_row_major(out, pinocchio::jacobianCenterOfMass(impl_->model, impl_->data, qv));
+}
+
+void PinocchioModel::centroidal_map(rust::Slice<const double> q, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  fill_row_major(out, pinocchio::computeCentroidalMap(impl_->model, impl_->data, qv));
+}
+
+void PinocchioModel::mass_matrix(rust::Slice<const double> q, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  pinocchio::crba(impl_->model, impl_->data, qv);
+  // crba fills only the upper triangle; mirror it.
+  impl_->data.M.triangularView<Eigen::StrictlyLower>() =
+      impl_->data.M.transpose().triangularView<Eigen::StrictlyLower>();
+  Eigen::MatrixXd M = impl_->data.M;
+  for (Eigen::Index k = 0; k < M.rows(); ++k) {
+    M(k, k) += impl_->model.rotorGearRatio[k] * impl_->model.rotorGearRatio[k] *
+               impl_->model.rotorInertia[k];
+  }
+  fill_row_major(out, M);
+}
+
+void PinocchioModel::generalized_gravity(rust::Slice<const double> q, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  pinocchio::computeGeneralizedGravity(impl_->model, impl_->data, qv);
+  copy_vector(out, impl_->data.g);
+}
+
+void PinocchioModel::non_linear_effects(rust::Slice<const double> q,
+                                        rust::Slice<const double> v, rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  auto vv = map_v(impl_->model, v);
+  copy_vector(out, pinocchio::nonLinearEffects(impl_->model, impl_->data, qv, vv));
+}
+
+double PinocchioModel::total_mass() const {
+  double mass = 0.0;
+  for (const auto &inertia : impl_->model.inertias) {
+    mass += inertia.mass();
+  }
+  return mass;
+}
+
+bool PinocchioModel::exist_joint(rust::Str name) const {
+  return impl_->model.existJointName(std::string(name));
+}
+
+std::int64_t PinocchioModel::joint_q_offset(rust::Str name) const {
+  const std::string n(name);
+  if (!impl_->model.existJointName(n)) {
+    return -1;
+  }
+  return impl_->model.joints[impl_->model.getJointId(n)].idx_q();
+}
+
+std::int64_t PinocchioModel::joint_v_offset(rust::Str name) const {
+  const std::string n(name);
+  if (!impl_->model.existJointName(n)) {
+    return -1;
+  }
+  return impl_->model.joints[impl_->model.getJointId(n)].idx_v();
+}
+
+std::int64_t PinocchioModel::joint_nq(rust::Str name) const {
+  const std::string n(name);
+  if (!impl_->model.existJointName(n)) {
+    return -1;
+  }
+  return impl_->model.joints[impl_->model.getJointId(n)].nq();
+}
+
+std::int64_t PinocchioModel::joint_nv(rust::Str name) const {
+  const std::string n(name);
+  if (!impl_->model.existJointName(n)) {
+    return -1;
+  }
+  return impl_->model.joints[impl_->model.getJointId(n)].nv();
+}
+
+rust::Vec<rust::String> PinocchioModel::joint_names(bool include_floating_base) const {
+  rust::Vec<rust::String> out;
+  for (const auto &name : impl_->model.names) {
+    if (!include_floating_base && (name == "universe" || name == "root_joint")) {
+      continue;
+    }
+    out.push_back(rust::String(name));
+  }
+  return out;
+}
+
+rust::Vec<rust::String> PinocchioModel::frame_names() const {
+  rust::Vec<rust::String> out;
+  for (const auto &frame : impl_->model.frames) {
+    out.push_back(rust::String(frame.name));
+  }
+  return out;
+}
+
+void PinocchioModel::lower_position_limits(rust::Slice<double> out) const {
+  copy_vector(out, impl_->model.lowerPositionLimit);
+}
+
+void PinocchioModel::upper_position_limits(rust::Slice<double> out) const {
+  copy_vector(out, impl_->model.upperPositionLimit);
+}
+
+void PinocchioModel::velocity_limits(rust::Slice<double> out) const {
+  copy_vector(out, impl_->model.velocityLimit);
+}
+
+void PinocchioModel::effort_limits(rust::Slice<double> out) const {
+  copy_vector(out, impl_->model.effortLimit);
+}
+
+void PinocchioModel::set_position_limit(std::int64_t k, double lower, double upper) {
+  impl_->model.lowerPositionLimit[static_cast<Eigen::Index>(k)] = lower;
+  impl_->model.upperPositionLimit[static_cast<Eigen::Index>(k)] = upper;
+}
+
+void PinocchioModel::set_velocity_limit(std::int64_t k, double limit) {
+  impl_->model.velocityLimit[static_cast<Eigen::Index>(k)] = limit;
+}
+
+void PinocchioModel::set_effort_limit(std::int64_t k, double limit) {
+  impl_->model.effortLimit[static_cast<Eigen::Index>(k)] = limit;
+}
+
+void PinocchioModel::set_rotor_inertia(std::int64_t k, double inertia) {
+  impl_->model.rotorInertia[static_cast<Eigen::Index>(k)] = inertia;
+}
+
+void PinocchioModel::set_gear_ratio(std::int64_t k, double ratio) {
+  impl_->model.rotorGearRatio[static_cast<Eigen::Index>(k)] = ratio;
+}
+
+void PinocchioModel::set_gravity(double x, double y, double z) {
+  impl_->model.gravity.linear() = Eigen::Vector3d(x, y, z);
 }
 
 std::unique_ptr<PinocchioModel> from_urdf(rust::Str path, bool floating_base) {

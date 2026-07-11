@@ -15,5 +15,7 @@
 //! planning) build on the Pinocchio binding and additionally require the `ffi`
 //! feature.
 
+#[cfg(feature = "ffi")]
+pub mod model;
 pub mod problem;
 pub mod tools;

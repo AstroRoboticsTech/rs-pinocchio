@@ -59,6 +59,54 @@ public:
   void frame_jacobian(std::int64_t id, std::uint8_t reference_frame,
                       rust::Slice<double> out) const;
 
+  // --- RobotWrapper-supporting primitives ------------------------------------
+
+  // Full kinematics update for state (q, v): frames FK, joint Jacobians +
+  // their time variation, and frame placements.
+  void update_kinematics(rust::Slice<const double> q, rust::Slice<const double> v);
+
+  void frame_jacobian_time_variation(std::int64_t id, std::uint8_t reference_frame,
+                                     rust::Slice<double> out) const;
+  void joint_jacobian(std::int64_t joint_id, std::uint8_t reference_frame,
+                      rust::Slice<double> out) const;
+
+  void neutral(rust::Slice<double> out) const;
+  void integrate(rust::Slice<const double> q, rust::Slice<const double> v,
+                 rust::Slice<double> out) const;
+
+  void center_of_mass(rust::Slice<const double> q, rust::Slice<double> out);
+  void com_jacobian(rust::Slice<const double> q, rust::Slice<double> out);
+  void centroidal_map(rust::Slice<const double> q, rust::Slice<double> out);
+
+  void mass_matrix(rust::Slice<const double> q, rust::Slice<double> out);
+  void generalized_gravity(rust::Slice<const double> q, rust::Slice<double> out);
+  void non_linear_effects(rust::Slice<const double> q, rust::Slice<const double> v,
+                          rust::Slice<double> out);
+
+  double total_mass() const;
+
+  bool exist_joint(rust::Str name) const;
+  std::int64_t joint_q_offset(rust::Str name) const;
+  std::int64_t joint_v_offset(rust::Str name) const;
+  std::int64_t joint_nq(rust::Str name) const;
+  std::int64_t joint_nv(rust::Str name) const;
+
+  rust::Vec<rust::String> joint_names(bool include_floating_base) const;
+  rust::Vec<rust::String> frame_names() const;
+
+  void lower_position_limits(rust::Slice<double> out) const;
+  void upper_position_limits(rust::Slice<double> out) const;
+  void velocity_limits(rust::Slice<double> out) const;
+  void effort_limits(rust::Slice<double> out) const;
+
+  void set_position_limit(std::int64_t k, double lower, double upper);
+  void set_velocity_limit(std::int64_t k, double limit);
+  void set_effort_limit(std::int64_t k, double limit);
+
+  void set_rotor_inertia(std::int64_t k, double inertia);
+  void set_gear_ratio(std::int64_t k, double ratio);
+  void set_gravity(double x, double y, double z);
+
 private:
   std::unique_ptr<struct ModelData> impl_;
 };
