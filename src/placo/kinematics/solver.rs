@@ -2,8 +2,12 @@
 
 use std::collections::BTreeSet;
 
-use nalgebra::{DVector, Isometry3, Matrix3, Vector3};
+use nalgebra::{DVector, Isometry3, Matrix3, Vector2, Vector3};
 
+use super::constraints::{
+    CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
+    KinematicsConstraint, YawConstraint,
+};
 use super::relative_tasks::{
     AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
     RelativePositionTask,
@@ -17,6 +21,9 @@ use crate::placo::tools::Priority;
 
 /// Handle to a task added to the solver.
 pub type TaskId = usize;
+
+/// Handle to a constraint added to the solver.
+pub type ConstraintId = usize;
 
 /// Handles to the position + orientation tasks of an [`KinematicsSolver::add_frame_task`].
 #[derive(Clone, Copy, Debug)]
@@ -33,6 +40,7 @@ pub struct FrameTaskHandle {
 /// repeatedly, applying the resulting `qd` to the robot to converge.
 pub struct KinematicsSolver {
     tasks: Vec<Box<dyn KinematicsTask>>,
+    constraints: Vec<Box<dyn KinematicsConstraint>>,
     masked_dof: BTreeSet<usize>,
     masked_fbase: bool,
     n: usize,
@@ -49,6 +57,7 @@ impl KinematicsSolver {
     pub fn new(robot: &RobotWrapper) -> Self {
         Self {
             tasks: Vec::new(),
+            constraints: Vec::new(),
             masked_dof: BTreeSet::new(),
             masked_fbase: false,
             n: robot.nv(),
@@ -61,6 +70,75 @@ impl KinematicsSolver {
     fn push(&mut self, task: Box<dyn KinematicsTask>) -> TaskId {
         self.tasks.push(task);
         self.tasks.len() - 1
+    }
+
+    fn push_constraint(&mut self, constraint: Box<dyn KinematicsConstraint>) -> ConstraintId {
+        self.constraints.push(constraint);
+        self.constraints.len() - 1
+    }
+
+    /// Adds a cone constraint (z-axes of two frames within `angle_max`).
+    pub fn add_cone_constraint(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        angle_max: f64,
+    ) -> ConstraintId {
+        self.push_constraint(Box::new(ConeConstraint::new(frame_a, frame_b, angle_max)))
+    }
+
+    /// Adds a yaw constraint (relative yaw of two frames within `± angle_max`).
+    pub fn add_yaw_constraint(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        angle_max: f64,
+    ) -> ConstraintId {
+        self.push_constraint(Box::new(YawConstraint::new(frame_a, frame_b, angle_max)))
+    }
+
+    /// Adds a distance constraint (frames at most `distance_max` apart).
+    pub fn add_distance_constraint(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        distance_max: f64,
+    ) -> ConstraintId {
+        self.push_constraint(Box::new(DistanceConstraint::new(
+            frame_a,
+            frame_b,
+            distance_max,
+        )))
+    }
+
+    /// Adds a CoM-polygon constraint (CoM xy inside a clockwise polygon).
+    pub fn add_com_polygon_constraint(
+        &mut self,
+        polygon: Vec<Vector2<f64>>,
+        margin: f64,
+    ) -> ConstraintId {
+        self.push_constraint(Box::new(CoMPolygonConstraint::new(polygon, margin)))
+    }
+
+    /// Adds a joint-space half-spaces constraint `A·q ≤ b` (`A` has `nq` cols).
+    pub fn add_joint_space_half_spaces_constraint(
+        &mut self,
+        a: nalgebra::DMatrix<f64>,
+        b: nalgebra::DVector<f64>,
+    ) -> ConstraintId {
+        self.push_constraint(Box::new(JointSpaceHalfSpacesConstraint::new(a, b)))
+    }
+
+    /// Sets a constraint's priority (hard/soft) and soft weight.
+    pub fn configure_constraint(
+        &mut self,
+        id: ConstraintId,
+        priority: ConstraintPriority,
+        weight: f64,
+    ) {
+        if let Some(c) = self.constraints.get_mut(id) {
+            c.set_priority_weight(priority, weight);
+        }
     }
 
     /// Adds a position task on `frame_index` targeting `target_world`.
@@ -255,6 +333,10 @@ impl KinematicsSolver {
         }
 
         self.add_limits(&mut problem, qd, robot)?;
+
+        for constraint in &self.constraints {
+            constraint.add_to(&mut problem, qd, robot, self.dt)?;
+        }
 
         problem
             .solve()

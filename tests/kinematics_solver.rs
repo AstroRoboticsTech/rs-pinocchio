@@ -115,6 +115,37 @@ fn ik_relative_position_reaches_target() {
 
 #[test]
 #[ignore = "requires a linkable Pinocchio install"]
+fn distance_constraint_bounds_frames() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    let base = robot.frame_index("base_link").expect("base frame");
+    let tool = robot.frame_index("tool").expect("tool frame");
+
+    let mut solver = KinematicsSolver::new(&robot);
+    solver.mask_fbase(true);
+    // Pull the tool far (soft), but constrain base<->tool distance to <= 0.25.
+    solver.add_position_task(tool, nalgebra::Vector3::new(5.0, 5.0, 5.0));
+    solver.add_regularization_task(1e-6);
+    let max = 0.25;
+    solver.add_distance_constraint(base, tool, max);
+
+    for _ in 0..200 {
+        solver.solve(&mut robot, true).expect("solve");
+    }
+
+    robot.update_kinematics().unwrap();
+    let d = (robot.t_world_frame(tool).unwrap().translation.vector
+        - robot.t_world_frame(base).unwrap().translation.vector)
+        .norm();
+    assert!(
+        d <= max + 1e-3,
+        "distance {d} exceeded the constraint {max}"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
 fn masked_fbase_keeps_base_fixed() {
     let path = write_fixture();
     let mut robot = RobotWrapper::from_urdf(&path).expect("load");
