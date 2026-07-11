@@ -16,7 +16,9 @@ pub use constraints::{
     CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
     KinematicsConstraint, YawConstraint,
 };
-pub use more_tasks::{GearTask, KineticEnergyRegularizationTask};
+pub use more_tasks::{
+    GearTask, KineticEnergyRegularizationTask, ManipulabilityTask, ManipulabilityType,
+};
 pub use relative_tasks::{
     AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
     RelativePositionTask,

@@ -113,6 +113,17 @@ pub(crate) mod bridge {
         /// Total mass of the model.
         fn total_mass(self: &PinocchioModel) -> f64;
 
+        /// Compute the joint kinematic hessians (needed before [`frame_hessian`]).
+        fn compute_hessians(self: Pin<&mut PinocchioModel>);
+        /// Fill `out` (`6 * nv`, row-major) with the frame hessian component for
+        /// velocity DoF `joint_v_index`. Requires a prior [`compute_hessians`].
+        fn frame_hessian(
+            self: Pin<&mut PinocchioModel>,
+            frame_id: i64,
+            joint_v_index: i64,
+            out: &mut [f64],
+        ) -> Result<()>;
+
         /// Placement of the root (free-flyer) joint, `model.jointPlacements[1]`
         /// (usually identity). Used to map the free-flyer config to the base pose.
         fn root_joint_placement(self: &PinocchioModel) -> FramePlacement;

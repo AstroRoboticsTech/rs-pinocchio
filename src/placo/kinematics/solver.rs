@@ -8,7 +8,9 @@ use super::constraints::{
     CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
     KinematicsConstraint, YawConstraint,
 };
-use super::more_tasks::{GearTask, KineticEnergyRegularizationTask};
+use super::more_tasks::{
+    GearTask, KineticEnergyRegularizationTask, ManipulabilityTask, ManipulabilityType,
+};
 use super::relative_tasks::{
     AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
     RelativePositionTask,
@@ -256,6 +258,17 @@ impl KinematicsSolver {
     /// Adds an (empty) gear task coupling joints with ratios.
     pub fn add_gear_task(&mut self) -> TaskId {
         self.push(Box::new(GearTask::new()))
+    }
+
+    /// Adds a manipulability task on `frame_index` (soft; gradient-ascent on
+    /// `sqrt(det(J·Jᵀ))`).
+    pub fn add_manipulability_task(
+        &mut self,
+        frame_index: usize,
+        kind: ManipulabilityType,
+        lambda: f64,
+    ) -> TaskId {
+        self.push(Box::new(ManipulabilityTask::new(frame_index, kind, lambda)))
     }
 
     /// Adds a kinetic-energy regularization task (requires

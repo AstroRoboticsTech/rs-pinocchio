@@ -87,6 +87,10 @@ public:
 
   double total_mass() const;
 
+  void compute_hessians();
+  void frame_hessian(std::int64_t frame_id, std::int64_t joint_v_index,
+                     rust::Slice<double> out);
+
   FramePlacement root_joint_placement() const;
 
   bool exist_joint(rust::Str name) const;

@@ -216,6 +216,22 @@ impl RobotWrapper {
         Ok(DMatrix::from_row_slice(3, self.nv, &out))
     }
 
+    /// Computes the joint kinematic hessians (needed before [`Self::frame_hessian`]).
+    pub fn compute_hessians(&mut self) {
+        self.inner.pin_mut().compute_hessians();
+    }
+
+    /// The `6 × nv` frame hessian component for velocity DoF `joint_v_index`.
+    /// Requires a prior [`Self::compute_hessians`].
+    pub fn frame_hessian(&mut self, frame: usize, joint_v_index: usize) -> Result<DMatrix<f64>> {
+        let mut out = vec![0.0; 6 * self.nv];
+        self.inner
+            .pin_mut()
+            .frame_hessian(frame as i64, joint_v_index as i64, out.as_mut_slice())
+            .map_err(|e| Error::Cxx(e.what().to_string()))?;
+        Ok(DMatrix::from_row_slice(6, self.nv, &out))
+    }
+
     /// The `3 × nv` CoM Jacobian time variation.
     pub fn com_jacobian_time_variation(&mut self) -> Result<DMatrix<f64>> {
         let mut out = vec![0.0; 3 * self.nv];

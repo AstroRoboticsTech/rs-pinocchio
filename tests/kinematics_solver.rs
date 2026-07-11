@@ -7,7 +7,9 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use rs_pinocchio::placo::kinematics::{GearTask, KinematicsSolver};
+use rs_pinocchio::placo::kinematics::{
+    GearTask, KinematicsSolver, ManipulabilityTask, ManipulabilityType,
+};
 use rs_pinocchio::placo::model::RobotWrapper;
 use rs_pinocchio::placo::tools::Priority;
 
@@ -148,6 +150,69 @@ fn gear_task_couples_joints() {
         "gear broken: j2={j2}, 2*j1={}",
         2.0 * j1
     );
+    let _ = std::fs::remove_file(&path);
+}
+
+// A 3-DoF arm so position manipulability (3 rows) is non-singular.
+const ARM3_URDF: &str = r#"<?xml version="1.0"?>
+<robot name="arm3">
+  <link name="base_link"><inertial><mass value="1.0"/>
+    <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="l1"><inertial><mass value="1.0"/>
+    <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="l2"><inertial><mass value="1.0"/>
+    <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="l3"><inertial><mass value="1.0"/>
+    <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>
+  <link name="tool3"><inertial><mass value="0.5"/>
+    <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/></inertial></link>
+  <joint name="j1" type="revolute"><parent link="base_link"/><child link="l1"/>
+    <origin xyz="0 0 0.1"/><axis xyz="0 0 1"/><limit lower="-3" upper="3" effort="10" velocity="10"/></joint>
+  <joint name="j2" type="revolute"><parent link="l1"/><child link="l2"/>
+    <origin xyz="0 0 0.2"/><axis xyz="0 1 0"/><limit lower="-3" upper="3" effort="10" velocity="10"/></joint>
+  <joint name="j3" type="revolute"><parent link="l2"/><child link="l3"/>
+    <origin xyz="0.2 0 0"/><axis xyz="0 0 1"/><limit lower="-3" upper="3" effort="10" velocity="10"/></joint>
+  <joint name="tool3_fixed" type="fixed"><parent link="l3"/><child link="tool3"/>
+    <origin xyz="0.1 0 0"/></joint>
+</robot>
+"#;
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn manipulability_task_runs_and_measures() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static C: AtomicU64 = AtomicU64::new(0);
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "rs_pinocchio_arm3_{}_{}.urdf",
+        std::process::id(),
+        C.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&path, ARM3_URDF).unwrap();
+
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    robot.set_joint("j1", 0.3).unwrap();
+    robot.set_joint("j2", 0.5).unwrap();
+    robot.set_joint("j3", 0.4).unwrap();
+    let tool = robot.frame_index("tool3").expect("tool frame");
+
+    let mut solver = KinematicsSolver::new(&robot);
+    solver.mask_fbase(true);
+    let mid = solver.add_manipulability_task(tool, ManipulabilityType::Position, 1.0);
+    solver.configure_task(mid, "manip", Priority::Soft, 1e-3);
+    robot.update_kinematics().unwrap();
+    let here = robot.t_world_frame(tool).unwrap().translation.vector;
+    solver.add_position_task(tool, here);
+
+    solver.solve(&mut robot, true).expect("solve");
+
+    // Away from a singularity, the manipulability is positive (the hessian
+    // pipeline ran to compute the gradient).
+    let manip = solver
+        .task_mut::<ManipulabilityTask>(mid)
+        .unwrap()
+        .manipulability;
+    assert!(manip > 1e-6, "manipulability not measured: {manip}");
     let _ = std::fs::remove_file(&path);
 }
 

@@ -19,6 +19,7 @@
 #include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/kinematics-derivatives.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
 #include <Eigen/Geometry>
@@ -324,6 +325,25 @@ double PinocchioModel::total_mass() const {
     mass += inertia.mass();
   }
   return mass;
+}
+
+void PinocchioModel::compute_hessians() {
+  pinocchio::computeJointKinematicHessians(impl_->model, impl_->data);
+}
+
+void PinocchioModel::frame_hessian(std::int64_t frame_id, std::int64_t joint_v_index,
+                                   rust::Slice<double> out) {
+  const auto &frame = impl_->model.frames[static_cast<std::size_t>(frame_id)];
+  const pinocchio::JointIndex joint_id = frame.parentJoint;
+  const pinocchio::SE3 T = frame.placement;
+
+  pinocchio::Tensor<double, 3> H =
+      pinocchio::getJointKinematicHessian(impl_->model, impl_->data, joint_id, pinocchio::LOCAL);
+  const Eigen::DenseIndex matrix_offset = 6 * impl_->model.nv;
+  Eigen::Map<Eigen::MatrixXd> hessian(H.data() + joint_v_index * matrix_offset, 6,
+                                      impl_->model.nv);
+  Eigen::MatrixXd result = T.inverse().toActionMatrix() * hessian;
+  fill_row_major(out, result);
 }
 
 FramePlacement PinocchioModel::root_joint_placement() const {
