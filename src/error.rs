@@ -13,6 +13,10 @@ pub enum Error {
     #[error("frame not found: {0}")]
     FrameNotFound(String),
 
+    /// No joint with the requested name exists in the model.
+    #[error("joint not found: {0}")]
+    JointNotFound(String),
+
     /// A supplied slice/vector had the wrong length for the operation.
     #[error("dimension mismatch: expected {expected}, got {got} ({what})")]
     DimMismatch {

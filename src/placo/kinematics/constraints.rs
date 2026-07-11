@@ -16,6 +16,10 @@ fn dmat3(m: &Matrix3<f64>) -> DMatrix<f64> {
     DMatrix::from_column_slice(3, 3, m.as_slice())
 }
 
+fn skew(v: &Vector3<f64>) -> DMatrix<f64> {
+    DMatrix::from_row_slice(3, 3, &[0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0])
+}
+
 /// A constraint added to the [`super::KinematicsSolver`] QP.
 pub trait KinematicsConstraint: Any {
     /// Adds the constraint's inequalities to `problem` over the `qd` variable.
@@ -28,6 +32,8 @@ pub trait KinematicsConstraint: Any {
     ) -> Result<()>;
     /// Sets the constraint priority (hard/soft) and soft weight.
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64);
+    /// Downcast hook for typed reconfiguration.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 // Shared hard/soft config with a helper to add a built expression.
@@ -85,6 +91,9 @@ impl ConeConstraint {
 impl KinematicsConstraint for ConeConstraint {
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
         self.config = Config { priority, weight };
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
     fn add_to(
         &self,
@@ -153,6 +162,9 @@ impl KinematicsConstraint for YawConstraint {
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
         self.config = Config { priority, weight };
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn add_to(
         &self,
         problem: &mut Problem,
@@ -212,6 +224,9 @@ impl KinematicsConstraint for DistanceConstraint {
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
         self.config = Config { priority, weight };
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn add_to(
         &self,
         problem: &mut Problem,
@@ -261,6 +276,9 @@ impl KinematicsConstraint for CoMPolygonConstraint {
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
         self.config = Config { priority, weight };
     }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
     fn add_to(
         &self,
         problem: &mut Problem,
@@ -277,6 +295,119 @@ impl KinematicsConstraint for CoMPolygonConstraint {
         let mut constraint = in_polygon_xy(&com_xy, &self.polygon, self.margin);
         constraint.configure(self.config.priority, self.config.weight);
         problem.add_constraint(constraint);
+        Ok(())
+    }
+}
+
+/// A pairwise nearest-point distance between two robot bodies, used by
+/// [`AvoidSelfCollisionsConstraint`]. Mirrors one entry of PlaCo's
+/// `RobotWrapper::distances()` (which is produced by the coal collision backend).
+#[derive(Clone, Debug)]
+pub struct CollisionDistance {
+    /// Frame index of body A.
+    pub frame_a: usize,
+    /// Frame index of body B.
+    pub frame_b: usize,
+    /// Nearest point on body A, in world coordinates.
+    pub point_a: Vector3<f64>,
+    /// Nearest point on body B, in world coordinates.
+    pub point_b: Vector3<f64>,
+    /// Signed minimum distance (negative on interpenetration).
+    pub min_distance: f64,
+}
+
+/// Keeps robot bodies from colliding with each other (PlaCo
+/// `AvoidSelfCollisionsConstraint`).
+///
+/// For each supplied [`CollisionDistance`] closer than `self_collisions_trigger`,
+/// it adds `n·(J_B − J_A)·qd + d ≥ self_collisions_margin`, where `n` is the unit
+/// vector between the nearest points (from A to B, flipped on interpenetration)
+/// and `J_A`/`J_B` are the world-aligned point-velocity Jacobians at those
+/// nearest points — i.e. the relative separation velocity must keep the bodies
+/// at least the margin apart.
+///
+/// The nearest-point [`distances`](Self::distances) are supplied by the caller
+/// (from their collision backend); the raw coal geometry query is a Pinocchio
+/// concern that is not exposed by the current binding.
+pub struct AvoidSelfCollisionsConstraint {
+    config: Config,
+    /// Margin kept between bodies [m].
+    pub self_collisions_margin: f64,
+    /// Distance below which a pair is constrained [m].
+    pub self_collisions_trigger: f64,
+    /// The pairwise nearest-point distances to enforce.
+    pub distances: Vec<CollisionDistance>,
+}
+
+impl AvoidSelfCollisionsConstraint {
+    pub(crate) fn new() -> Self {
+        Self {
+            config: Config::default(),
+            self_collisions_margin: 0.005,
+            self_collisions_trigger: 0.01,
+            distances: Vec::new(),
+        }
+    }
+
+    // World-aligned point-velocity Jacobian at `point` on `frame`
+    // (`J_lin − skew(point − origin)·J_ang`).
+    fn point_jacobian(
+        robot: &RobotWrapper,
+        frame: usize,
+        point: &Vector3<f64>,
+    ) -> Result<DMatrix<f64>> {
+        let j = robot.frame_jacobian(frame, ReferenceFrame::LocalWorldAligned)?;
+        let origin = robot.t_world_frame(frame)?.translation.vector;
+        let r = point - origin;
+        Ok(j.rows(0, 3).into_owned() - skew(&r) * j.rows(3, 3).into_owned())
+    }
+}
+
+impl KinematicsConstraint for AvoidSelfCollisionsConstraint {
+    fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
+        self.config = Config { priority, weight };
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn add_to(
+        &self,
+        problem: &mut Problem,
+        _qd: Variable,
+        robot: &mut RobotWrapper,
+        _dt: f64,
+    ) -> Result<()> {
+        let active: Vec<&CollisionDistance> = self
+            .distances
+            .iter()
+            .filter(|d| d.min_distance < self.self_collisions_trigger)
+            .collect();
+        if active.is_empty() {
+            return Ok(());
+        }
+
+        let nv = robot.nv();
+        let mut a = DMatrix::zeros(active.len(), nv);
+        let mut b = DVector::zeros(active.len());
+        for (k, d) in active.iter().enumerate() {
+            let jpa = Self::point_jacobian(robot, d.frame_a, &d.point_a)?;
+            let jpb = Self::point_jacobian(robot, d.frame_b, &d.point_b)?;
+            let mut n = (d.point_b - d.point_a).normalize();
+            if d.min_distance < 0.0 {
+                n = -n;
+            }
+            let row = DMatrix::from_row_slice(1, 3, n.as_slice()) * (jpb - jpa);
+            a.row_mut(k).copy_from(&row.row(0));
+            b[k] = d.min_distance;
+        }
+
+        self.config.add(
+            problem,
+            Expression { a, b }.geq_vector(DVector::from_element(
+                active.len(),
+                self.self_collisions_margin,
+            )),
+        );
         Ok(())
     }
 }
@@ -305,6 +436,9 @@ impl JointSpaceHalfSpacesConstraint {
 impl KinematicsConstraint for JointSpaceHalfSpacesConstraint {
     fn set_priority_weight(&mut self, priority: ConstraintPriority, weight: f64) {
         self.config = Config { priority, weight };
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
     fn add_to(
         &self,

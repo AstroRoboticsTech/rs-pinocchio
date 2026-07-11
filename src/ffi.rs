@@ -131,6 +131,10 @@ pub(crate) mod bridge {
         // Joint metadata (by name). Offsets are `-1` when the joint is absent.
         /// Whether a joint with `name` exists.
         fn exist_joint(self: &PinocchioModel, name: &str) -> bool;
+        /// Pinocchio joint index of joint `name`, or `-1` if absent.
+        fn joint_id(self: &PinocchioModel, name: &str) -> i64;
+        /// World placement `oMi` of joint `joint_id`. Requires prior kinematics.
+        fn joint_placement(self: &PinocchioModel, joint_id: i64) -> Result<FramePlacement>;
         /// `idx_q` (offset into `q`) of joint `name`, or `-1`.
         fn joint_q_offset(self: &PinocchioModel, name: &str) -> i64;
         /// `idx_v` (offset into `v`/`a`) of joint `name`, or `-1`.

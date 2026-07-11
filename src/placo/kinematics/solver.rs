@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use nalgebra::{DVector, Isometry3, Matrix3, Vector2, Vector3};
 
 use super::constraints::{
-    CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
-    KinematicsConstraint, YawConstraint,
+    AvoidSelfCollisionsConstraint, CoMPolygonConstraint, ConeConstraint, DistanceConstraint,
+    JointSpaceHalfSpacesConstraint, KinematicsConstraint, YawConstraint,
 };
 use super::more_tasks::{
     GearTask, KineticEnergyRegularizationTask, ManipulabilityTask, ManipulabilityType,
@@ -17,6 +17,7 @@ use super::relative_tasks::{
 };
 use super::task::KinematicsTask;
 use super::tasks::{CoMTask, JointsTask, OrientationTask, PositionTask, RegularizationTask};
+use super::wheel_task::WheelTask;
 use crate::error::Result;
 use crate::placo::model::RobotWrapper;
 use crate::placo::problem::{Constraint, ConstraintPriority, Expression, Problem};
@@ -132,6 +133,12 @@ impl KinematicsSolver {
         self.push_constraint(Box::new(JointSpaceHalfSpacesConstraint::new(a, b)))
     }
 
+    /// Adds a self-collision-avoidance constraint. Supply the nearest-point
+    /// distances each solve via [`KinematicsSolver::constraint_mut`].
+    pub fn add_avoid_self_collisions_constraint(&mut self) -> ConstraintId {
+        self.push_constraint(Box::new(AvoidSelfCollisionsConstraint::new()))
+    }
+
     /// Sets a constraint's priority (hard/soft) and soft weight.
     pub fn configure_constraint(
         &mut self,
@@ -142,6 +149,15 @@ impl KinematicsSolver {
         if let Some(c) = self.constraints.get_mut(id) {
             c.set_priority_weight(priority, weight);
         }
+    }
+
+    /// Downcasts a constraint to its concrete type (e.g. to supply collision
+    /// distances to an [`AvoidSelfCollisionsConstraint`]).
+    pub fn constraint_mut<T: KinematicsConstraint>(&mut self, id: ConstraintId) -> Option<&mut T> {
+        self.constraints
+            .get_mut(id)?
+            .as_any_mut()
+            .downcast_mut::<T>()
     }
 
     /// Adds a position task on `frame_index` targeting `target_world`.
@@ -258,6 +274,18 @@ impl KinematicsSolver {
     /// Adds an (empty) gear task coupling joints with ratios.
     pub fn add_gear_task(&mut self) -> TaskId {
         self.push(Box::new(GearTask::new()))
+    }
+
+    /// Adds a rolling-without-slipping wheel task on `joint` (spinning about its
+    /// local z-axis) with the given `radius`. Set `t_world_surface` (default
+    /// identity) via [`KinematicsSolver::task_mut`].
+    pub fn add_wheel_task(
+        &mut self,
+        joint: impl Into<String>,
+        radius: f64,
+        omniwheel: bool,
+    ) -> TaskId {
+        self.push(Box::new(WheelTask::new(joint, radius, omniwheel)))
     }
 
     /// Adds a manipulability task on `frame_index` (soft; gradient-ascent on

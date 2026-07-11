@@ -367,6 +367,33 @@ bool PinocchioModel::exist_joint(rust::Str name) const {
   return impl_->model.existJointName(std::string(name));
 }
 
+std::int64_t PinocchioModel::joint_id(rust::Str name) const {
+  const std::string n(name);
+  if (!impl_->model.existJointName(n)) {
+    return -1;
+  }
+  return static_cast<std::int64_t>(impl_->model.getJointId(n));
+}
+
+FramePlacement PinocchioModel::joint_placement(std::int64_t joint_id) const {
+  if (joint_id < 0 ||
+      static_cast<std::size_t>(joint_id) >= impl_->data.oMi.size()) {
+    throw std::out_of_range("joint_placement: joint id out of range");
+  }
+  const pinocchio::SE3 &M = impl_->data.oMi[static_cast<std::size_t>(joint_id)];
+  const Eigen::Quaterniond quat(M.rotation());
+
+  FramePlacement fp{};
+  fp.translation[0] = M.translation().x();
+  fp.translation[1] = M.translation().y();
+  fp.translation[2] = M.translation().z();
+  fp.rotation[0] = quat.x();
+  fp.rotation[1] = quat.y();
+  fp.rotation[2] = quat.z();
+  fp.rotation[3] = quat.w();
+  return fp;
+}
+
 std::int64_t PinocchioModel::joint_q_offset(rust::Str name) const {
   const std::string n(name);
   if (!impl_->model.existJointName(n)) {

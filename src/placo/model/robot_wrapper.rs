@@ -168,6 +168,24 @@ impl RobotWrapper {
         Ok(())
     }
 
+    /// Pinocchio joint index of joint `name`.
+    pub fn joint_id(&self, name: &str) -> Result<usize> {
+        let id = self.inner.joint_id(name);
+        if id < 0 {
+            return Err(Error::JointNotFound(name.to_string()));
+        }
+        Ok(id as usize)
+    }
+
+    /// World placement `oMi` of joint `joint_id` (needs [`update_kinematics`]).
+    pub fn t_world_joint(&self, joint_id: usize) -> Result<Isometry3<f64>> {
+        let p = self
+            .inner
+            .joint_placement(joint_id as i64)
+            .map_err(|e| Error::Cxx(e.what().to_string()))?;
+        Ok(frame_placement_to_isometry(&p))
+    }
+
     /// The `6 × nv` frame Jacobian in `reference` (needs [`update_kinematics`]).
     pub fn frame_jacobian(&self, id: usize, reference: ReferenceFrame) -> Result<DMatrix<f64>> {
         let mut out = vec![0.0; 6 * self.nv];

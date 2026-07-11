@@ -11,10 +11,11 @@ mod relative_tasks;
 mod solver;
 mod task;
 mod tasks;
+mod wheel_task;
 
 pub use constraints::{
-    CoMPolygonConstraint, ConeConstraint, DistanceConstraint, JointSpaceHalfSpacesConstraint,
-    KinematicsConstraint, YawConstraint,
+    AvoidSelfCollisionsConstraint, CoMPolygonConstraint, CollisionDistance, ConeConstraint,
+    DistanceConstraint, JointSpaceHalfSpacesConstraint, KinematicsConstraint, YawConstraint,
 };
 pub use more_tasks::{
     GearTask, KineticEnergyRegularizationTask, ManipulabilityTask, ManipulabilityType,
@@ -26,3 +27,4 @@ pub use relative_tasks::{
 pub use solver::{ConstraintId, FrameTaskHandle, KinematicsSolver, TaskId};
 pub use task::{KinematicsTask, TaskBase};
 pub use tasks::{CoMTask, JointsTask, OrientationTask, PositionTask, RegularizationTask};
+pub use wheel_task::WheelTask;
