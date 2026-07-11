@@ -1,31 +1,53 @@
 # rs-pinocchio
 
-Clean-room Rust bindings for the [Pinocchio](https://github.com/stack-of-tasks/pinocchio)
-rigid-body dynamics library, via [cxx](https://cxx.rs). Built for whole-body IK
-(forward kinematics + frame Jacobians), reusable across projects.
+Rust rigid-body dynamics **and** QP-based planning/control: clean-room
+[cxx](https://cxx.rs) bindings to the
+[Pinocchio](https://github.com/stack-of-tasks/pinocchio) C++ library, plus a
+pure-Rust port of [Rhoban PlaCo](https://github.com/Rhoban/placo) — task-space
+inverse kinematics & dynamics, footstep and walk planning.
 
-The bindings are written from scratch against Pinocchio's own public BSD-2 C++
-API (`pinocchio::urdf::buildModel`, `forwardKinematics`, `updateFramePlacements`,
-`getFrameId`, `getFrameJacobian`, `computeJointJacobians`, `ReferenceFrame`). No
-code from any other Rust binding was consulted or copied.
+The Pinocchio bindings are written from scratch against Pinocchio's own public
+BSD-2 C++ API (`pinocchio::urdf::buildModel`, `forwardKinematics`,
+`getFrameJacobian`, CRBA / RNEA / centroidal, `ReferenceFrame`, …). No code from
+any other Rust binding was consulted or copied.
 
 ## Versioning
 
-The crate version **tracks the bound Pinocchio version** for convenience — e.g.
-`rs-pinocchio = "4.1.x"` binds Pinocchio `4.1.0`. Bump the crate minor/patch to
-follow Pinocchio releases. (The FK / frame-Jacobian API is stable across the
-4.0/4.1 series, so the crate also links and runs against Pinocchio 4.0.x.)
+The crate follows SemVer (`MAJOR.MINOR.PATCH`), with the components repurposed to
+track the bound Pinocchio version:
 
-## Scope (v4.1)
+- **`MAJOR.MINOR`** mirror the bound Pinocchio version's major.minor — `4.1.x`
+  binds Pinocchio **4.1**.
+- **`PATCH`** is *this crate's* own release counter within that Pinocchio line
+  (`4.1.0`, `4.1.1`, …), independent of Pinocchio's own patch number.
 
-- Load a `Model` from URDF (optional free-flyer root for mobile / whole-body bases)
-- Forward kinematics + `updateFramePlacements`
-- Frame lookup (`getFrameId`) + frame placements (SE3)
-- Frame Jacobians (`getFrameJacobian`; `LOCAL` / `WORLD` / `LOCAL_WORLD_ALIGNED`)
-- `nq` / `nv`
+The exact bound Pinocchio version is **4.1.0** (the crate also links and runs
+against Pinocchio 4.0.x for the FK / Jacobian subset). SemVer allows only three
+numeric components, so a four-part "custom bump" like `4.1.0.2` is **not** a valid
+crate version — the custom bump lives in the patch instead.
 
-Enough for a differential-IK / whole-body-IK layer to consume. Dynamics (mass
-matrix, RNEA/ABA, derivatives) are intentionally out of scope for now.
+## Scope
+
+**Pinocchio binding (`ffi` feature):**
+
+- `Model` / `RobotWrapper` from URDF (optional free-flyer root for floating bases)
+- Forward kinematics, frame placements (SE3), frame lookup
+- Frame & joint Jacobians (+ time variation): `LOCAL` / `WORLD` / `LOCAL_WORLD_ALIGNED`
+- Dynamics: mass matrix (CRBA), generalized gravity, non-linear effects (RNEA),
+  CoM & CoM Jacobian, centroidal map, kinematic hessians
+- Manifold `integrate` / `difference` / `neutral`, joint offsets & limits
+
+**PlaCo port (`placo` feature), pure Rust:**
+
+- `tools` (splines, polynomials, …) and `problem` — a QP modeling layer over
+  [clarabel](https://docs.rs/clarabel); both need no native deps
+- `kinematics` — task-space IK solver, ~15 tasks and 5 constraints
+- `dynamics` — task-space ID solver, tasks, contacts (point / 6D / line / wrench /
+  puppet / task) and joint/velocity/torque limits
+- `humanoid` — footstep planning, LIPM, swing-foot, walk pattern generator,
+  `HumanoidRobot`, `WalkTasks`
+
+Collision / self-collision geometry queries (coal) are not yet bound.
 
 ## Public API
 
@@ -64,7 +86,22 @@ Pinocchio's own enum).
 
 ### Cargo features
 
-- `trace` — emit [`tracing`](https://docs.rs/tracing) spans/events from the wrapper.
+| Feature | Default | Enables |
+|---------|:-------:|---------|
+| `ffi`   |   ✅    | The Pinocchio cxx binding (`Model`, `RobotWrapper`). Needs Pinocchio at build time (see [Build requirements](#build-requirements)). |
+| `placo` |         | The pure-Rust PlaCo port. Its `tools` + `problem` layers need no native deps; the kinematics / dynamics solvers additionally require `ffi`. |
+| `trace` |         | Emit [`tracing`](https://docs.rs/tracing) spans/events from the safe wrappers. |
+
+```toml
+# Default — the Pinocchio binding only:
+rs-pinocchio = "4.1"
+
+# Pure-Rust PlaCo planning layers, no Pinocchio needed:
+rs-pinocchio = { version = "4.1", default-features = false, features = ["placo"] }
+
+# Full framework — Pinocchio binding + PlaCo IK/ID solvers and walk planning:
+rs-pinocchio = { version = "4.1", features = ["placo"] }
+```
 
 ## Build requirements
 

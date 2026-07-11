@@ -1,6 +1,8 @@
 [package]
 name = "rs-pinocchio"
-version = "4.1.0"
+# Version scheme: MAJOR.MINOR mirror the bound Pinocchio version (4.1 = Pinocchio
+# 4.1.x); PATCH is this crate's own release counter. See README "Versioning".
+version = "4.1.1"
 edition = "2021"
 license = "BSD-2-Clause"
 description = "Rust rigid-body dynamics + QP planning/control: clean-room cxx bindings to Pinocchio, plus a pure-Rust port of Rhoban PlaCo (task-space IK/ID, footstep & walk planning)."
