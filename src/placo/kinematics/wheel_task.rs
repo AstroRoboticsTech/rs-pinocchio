@@ -74,7 +74,15 @@ impl KinematicsTask for WheelTask {
         let z = up;
         let y = z.cross(&x);
         let r_sc = Matrix3::from_columns(&[x, y, z]);
-        let origin = t_surface_wheel.translation.vector - self.radius * up;
+        // Step `radius` toward the surface along the in-plane steepest-descent
+        // direction (the wheel rim's lowest point), matching PlaCo: project
+        // -surface_z (expressed in the wheel frame, i.e. -R_swᵀ row) onto the
+        // wheel disk plane, then map back to the surface frame. For an upright
+        // wheel this reduces to straight down (-up).
+        let mut down_axis_wheel = -r_sw.row(2).transpose();
+        down_axis_wheel[2] = 0.0;
+        let down_axis_surface = r_sw * down_axis_wheel.normalize();
+        let origin = t_surface_wheel.translation.vector + self.radius * down_axis_surface;
         let t_surface_contact = Isometry3::from_parts(
             Translation3::from(origin),
             UnitQuaternion::from_matrix(&r_sc),
