@@ -2,7 +2,7 @@
 
 use std::any::Any;
 
-use nalgebra::{DMatrix, Matrix3};
+use nalgebra::{DMatrix, DVector, Matrix3};
 
 use crate::error::Result;
 use crate::placo::model::RobotWrapper;
@@ -193,5 +193,55 @@ impl Contact for Contact6D {
                 .add_constraint(e.slice(3, 3).equal_vector(nalgebra::DVector::zeros(3)))
                 .configure(ConstraintPriority::Soft, self.weight_moments);
         }
+    }
+}
+
+/// A known external wrench applied at a frame (PlaCo `ExternalWrenchContact`).
+///
+/// The 6-DoF "force" is fixed to `w_ext` rather than optimized.
+pub struct ExternalWrenchContact {
+    /// Frame index.
+    pub frame_index: usize,
+    /// Reference frame of the wrench Jacobian.
+    pub reference: ReferenceFrame,
+    /// The applied wrench `[Fx, Fy, Fz, Mx, My, Mz]`.
+    pub w_ext: DVector<f64>,
+    /// Whether this contact is active.
+    pub active: bool,
+    j: DMatrix<f64>,
+}
+
+impl ExternalWrenchContact {
+    pub(crate) fn new(frame_index: usize, reference: ReferenceFrame) -> Self {
+        Self {
+            frame_index,
+            reference,
+            w_ext: DVector::zeros(6),
+            active: true,
+            j: DMatrix::zeros(0, 0),
+        }
+    }
+}
+
+impl Contact for ExternalWrenchContact {
+    fn active(&self) -> bool {
+        self.active
+    }
+    fn size(&self) -> usize {
+        6
+    }
+    fn jacobian(&self) -> &DMatrix<f64> {
+        &self.j
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        self.j = robot.frame_jacobian(self.frame_index, self.reference)?;
+        Ok(())
+    }
+    fn add_constraints(&self, problem: &mut Problem, f: Variable) {
+        // The wrench is fixed (not a free variable).
+        problem.add_constraint(f.expr().equal_vector(self.w_ext.clone()));
     }
 }

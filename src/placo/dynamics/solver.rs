@@ -7,7 +7,7 @@
 
 use nalgebra::{DVector, Matrix3};
 
-use super::contacts::{Contact, Contact6D, PointContact};
+use super::contacts::{Contact, Contact6D, ExternalWrenchContact, PointContact};
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
 use super::task::DynamicsTask;
 use super::tasks::{JointsTask, PositionTask};
@@ -234,6 +234,18 @@ impl DynamicsSolver {
     pub fn add_planar_contact(&mut self, frame_index: usize) -> ContactId {
         self.contacts
             .push(Box::new(Contact6D::new(frame_index, true)));
+        self.contacts.len() - 1
+    }
+
+    /// Adds a known external wrench applied at `frame_index` (fixed, not
+    /// optimized). Set the wrench via [`DynamicsSolver::contact_mut`].
+    pub fn add_external_wrench_contact(
+        &mut self,
+        frame_index: usize,
+        reference: crate::ReferenceFrame,
+    ) -> ContactId {
+        self.contacts
+            .push(Box::new(ExternalWrenchContact::new(frame_index, reference)));
         self.contacts.len() - 1
     }
 
