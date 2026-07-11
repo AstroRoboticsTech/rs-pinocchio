@@ -1,0 +1,15 @@
+[submodule "third_party/tinyxml2"]
+	path = third_party/tinyxml2
+	url = https://github.com/leethomason/tinyxml2.git
+[submodule "third_party/console_bridge"]
+	path = third_party/console_bridge
+	url = https://github.com/ros/console_bridge.git
+[submodule "third_party/urdfdom_headers"]
+	path = third_party/urdfdom_headers
+	url = https://github.com/ros/urdfdom_headers.git
+[submodule "third_party/urdfdom"]
+	path = third_party/urdfdom
+	url = https://github.com/ros/urdfdom.git
+[submodule "third_party/pinocchio"]
+	path = third_party/pinocchio
+	url = https://github.com/stack-of-tasks/pinocchio.git

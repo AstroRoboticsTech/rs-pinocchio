@@ -1,3 +1,7 @@
 /target
 Cargo.lock
 **/*.rs.bk
+
+# Vendored Pinocchio source build artifacts (build.rs)
+/third_party/install/
+/third_party/build/

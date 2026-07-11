@@ -68,35 +68,36 @@ Pinocchio's own enum).
 
 ## Build requirements
 
-Pinocchio 4.1.0 (headers + libs) must be installed. The build script locates it
-in this order:
+By default the build is **self-contained**: Pinocchio 4.1.0 and its URDF-parser
+dependencies are vendored as git submodules under `third_party/` and compiled
+from source (collision support off) into `third_party/install` on the first
+`ffi` build, then cached. No system Pinocchio, conda, or pip is required.
+
+```sh
+git clone --recurse-submodules https://github.com/AstroRoboticsTech/rs-pinocchio
+cargo build --features ffi        # first build compiles Pinocchio (~10-15 min), then caches
+```
+
+If you cloned without `--recurse-submodules`, the build script initializes the
+needed submodules itself.
+
+Build-time tools + system libraries (not vendored): a **C++17 compiler**,
+**CMake ≥ 3.10** + a generator (**Ninja**), **Eigen 3** (via `pkg-config eigen3`,
+or brew/`/usr/include/eigen3`), and **Boost** headers (via `BOOST_ROOT`, brew, or
+a standard prefix).
+
+### Using a preinstalled Pinocchio instead
+
+To skip the source build, point the crate at an existing Pinocchio 4.1.0 install
+— the build script prefers it over the vendored build, in this order:
 
 1. `pkg-config` (conda-forge / robotpkg ship a `pinocchio.pc`).
 2. `PINOCCHIO_PREFIX` — an install prefix containing `include/` and `lib/`.
 3. `/opt/ros/$ROS_DISTRO` — ROS 2 debian packaging (`ros-<distro>-pinocchio`).
 
-Install options:
-
 ```sh
-# conda-forge (easiest, gives you exactly 4.1.0)
-conda install -c conda-forge pinocchio=4.1.0
-
-# robotpkg (Ubuntu; add the robotpkg apt source first)
-sudo apt install robotpkg-pinocchio
-
-# ROS 2 (4.0.x on Jazzy; API-compatible for this crate's scope)
-sudo apt install ros-<distro>-pinocchio
-source /opt/ros/<distro>/setup.bash   # exports ROS_DISTRO
+PINOCCHIO_PREFIX=/path/to/prefix cargo build --features ffi
 ```
-
-If Pinocchio lives in a custom prefix:
-
-```sh
-PINOCCHIO_PREFIX=/path/to/prefix cargo build
-```
-
-Also required at build time: a C++17 compiler, Eigen 3 (via `pkg-config eigen3`
-or `/usr/include/eigen3`), and Boost headers.
 
 ## Tests
 
