@@ -200,3 +200,50 @@ fn line_contacts_balance_gravity() {
     assert!(wl[3].abs() < 1e-9 && wr[3].abs() < 1e-9, "Mx not zero");
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
+fn task_contact_provides_force_through_task_jacobian() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load biped");
+    robot.update_kinematics().expect("update kinematics");
+
+    let left = robot.frame_index("left_foot").expect("left foot");
+    let right = robot.frame_index("right_foot").expect("right foot");
+
+    let lt = robot.t_world_frame(left).unwrap().translation.vector;
+    let rt = robot.t_world_frame(right).unwrap().translation.vector;
+
+    let mut solver = DynamicsSolver::new(&robot);
+    solver.gravity_only = true;
+
+    // Hold both feet; put a normal contact under the right foot and a task
+    // contact under the left (its force acts through the position task's A).
+    let lid = solver.add_position_task(left, lt);
+    solver.configure_task(lid, Priority::Hard, 1.0);
+    let rid = solver.add_position_task(right, rt);
+    solver.configure_task(rid, Priority::Hard, 1.0);
+
+    let tc = solver.add_task_contact(lid);
+    let rc = solver.add_unilateral_point_contact(right);
+
+    let result = solver.solve(&mut robot, false).expect("dynamics solve");
+    assert!(result.success);
+    assert!(result.tau.iter().all(|v| v.is_finite()));
+    assert!(
+        result.tau.rows(0, 6).norm() < 1e-6,
+        "fbase torque: {}",
+        result.tau.rows(0, 6).norm()
+    );
+
+    // The task contact's force has as many components as the task has rows (3).
+    let w_task = solver.contact_wrench(tc).expect("task contact wrench");
+    assert_eq!(w_task.len(), 3);
+    // Both contacts together carry the full weight vertically.
+    let total_fz = w_task[2] + solver.contact_wrench(rc).unwrap()[2];
+    assert!(
+        (total_fz - robot.total_mass() * 9.81).abs() < 1e-2,
+        "vertical force {total_fz} != weight"
+    );
+    let _ = std::fs::remove_file(&path);
+}

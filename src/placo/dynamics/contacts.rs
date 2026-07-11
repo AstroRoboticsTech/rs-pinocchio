@@ -336,6 +336,53 @@ impl Contact for ExternalWrenchContact {
     }
 }
 
+/// A contact whose force acts through an arbitrary task's Jacobian (PlaCo
+/// `TaskContact`). Its constraint Jacobian is set to the referenced task's `A`
+/// matrix at solve time, so the contact force is shaped by that task rather than
+/// a frame Jacobian. Adds no friction/unilaterality constraints of its own.
+pub struct TaskContact {
+    /// The task whose `A` matrix drives this contact.
+    pub task_id: usize,
+    /// Whether this contact is active.
+    pub active: bool,
+    j: DMatrix<f64>,
+}
+
+impl TaskContact {
+    pub(crate) fn new(task_id: usize) -> Self {
+        Self {
+            task_id,
+            active: true,
+            j: DMatrix::zeros(0, 0),
+        }
+    }
+
+    /// Sets the contact Jacobian (called by the solver from the task's `A`).
+    pub(crate) fn set_jacobian(&mut self, a: DMatrix<f64>) {
+        self.j = a;
+    }
+}
+
+impl Contact for TaskContact {
+    fn active(&self) -> bool {
+        self.active
+    }
+    fn size(&self) -> usize {
+        self.j.nrows()
+    }
+    fn jacobian(&self) -> &DMatrix<f64> {
+        &self.j
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn update(&mut self, _robot: &mut RobotWrapper) -> Result<()> {
+        // The Jacobian is supplied by the solver from the referenced task's A.
+        Ok(())
+    }
+    fn add_constraints(&self, _problem: &mut Problem, _f: Variable) {}
+}
+
 /// A "puppet" contact applying an unconstrained generalized force on every DoF
 /// (identity Jacobian) (PlaCo `PuppetContact`). Useful to fully actuate a robot
 /// (e.g. for testing or a floating puppet).

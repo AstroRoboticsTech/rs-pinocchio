@@ -15,6 +15,7 @@ mod tasks;
 
 pub use contacts::{
     Contact, Contact6D, ExternalWrenchContact, LineContact, PointContact, PuppetContact,
+    TaskContact,
 };
 pub use more_tasks::{CoMTask, OrientationTask, TargetTau, TorqueTask};
 pub use relative_tasks::{RelativeOrientationTask, RelativePositionTask};

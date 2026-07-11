@@ -9,6 +9,7 @@ use nalgebra::{DVector, Matrix3};
 
 use super::contacts::{
     Contact, Contact6D, ExternalWrenchContact, LineContact, PointContact, PuppetContact,
+    TaskContact,
 };
 use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
 use super::relative_tasks::{RelativeOrientationTask, RelativePositionTask};
@@ -296,6 +297,13 @@ impl DynamicsSolver {
         self.contacts.len() - 1
     }
 
+    /// Adds a task contact: a force acting through the Jacobian (`A` matrix) of
+    /// the task identified by `task_id`.
+    pub fn add_task_contact(&mut self, task_id: TaskId) -> ContactId {
+        self.contacts.push(Box::new(TaskContact::new(task_id)));
+        self.contacts.len() - 1
+    }
+
     /// Adds a known external wrench applied at `frame_index` (fixed, not
     /// optimized). Set the wrench via [`DynamicsSolver::contact_mut`].
     pub fn add_external_wrench_contact(
@@ -333,6 +341,11 @@ impl DynamicsSolver {
         for (ci, contact) in self.contacts.iter_mut().enumerate() {
             if !contact.active() {
                 continue;
+            }
+            // A TaskContact borrows its (already-updated) task's A matrix.
+            if let Some(tc) = contact.as_any_mut().downcast_mut::<TaskContact>() {
+                let a = self.tasks[tc.task_id].a().clone();
+                tc.set_jacobian(a);
             }
             contact.update(robot)?;
             let fvar = problem.add_variable(contact.size());
