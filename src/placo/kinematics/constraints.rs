@@ -260,6 +260,10 @@ pub struct CoMPolygonConstraint {
     pub polygon: Vec<Vector2<f64>>,
     /// Inward margin.
     pub margin: f64,
+    /// Constrain the DCM instead of the CoM (needs [`Self::omega`] and `solver.dt`).
+    pub dcm: bool,
+    /// LIPM natural frequency `sqrt(g/h)`, used when [`Self::dcm`] is set.
+    pub omega: f64,
 }
 
 impl CoMPolygonConstraint {
@@ -268,6 +272,8 @@ impl CoMPolygonConstraint {
             config: Config::default(),
             polygon,
             margin,
+            dcm: false,
+            omega: 0.0,
         }
     }
 }
@@ -284,12 +290,22 @@ impl KinematicsConstraint for CoMPolygonConstraint {
         problem: &mut Problem,
         _qd: Variable,
         robot: &mut RobotWrapper,
-        _dt: f64,
+        dt: f64,
     ) -> Result<()> {
         let com = robot.com_world()?;
         let jac = robot.com_jacobian()?;
+        let mut a = jac.rows(0, 2).into_owned();
+        if self.dcm {
+            // Future DCM = c + J·dq·(1 + 1/(dt·omega)).
+            if dt == 0.0 || self.omega == 0.0 {
+                return Err(crate::error::Error::Solver(
+                    "CoMPolygonConstraint DCM mode needs a non-zero solver.dt and omega".into(),
+                ));
+            }
+            a *= 1.0 + 1.0 / (dt * self.omega);
+        }
         let com_xy = Expression {
-            a: jac.rows(0, 2).into_owned(),
+            a,
             b: DVector::from_vec(vec![com.x, com.y]),
         };
         let mut constraint = in_polygon_xy(&com_xy, &self.polygon, self.margin);

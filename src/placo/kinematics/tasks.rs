@@ -205,6 +205,8 @@ pub struct RegularizationTask {
     base: TaskBase,
     /// Default per-DoF weight (square-rooted internally).
     pub magnitude: f64,
+    /// Per-joint weight overrides (joint name → weight).
+    joint_weights: Vec<(String, f64)>,
 }
 
 impl RegularizationTask {
@@ -212,7 +214,16 @@ impl RegularizationTask {
         Self {
             base: TaskBase::default(),
             magnitude,
+            joint_weights: Vec::new(),
         }
+    }
+
+    /// Overrides the regularization weight for a single joint (PlaCo
+    /// `set_joint_weight`); the last value for a joint wins.
+    pub fn set_joint_weight(&mut self, joint: impl Into<String>, weight: f64) {
+        let joint = joint.into();
+        self.joint_weights.retain(|(j, _)| *j != joint);
+        self.joint_weights.push((joint, weight));
     }
 }
 
@@ -236,6 +247,16 @@ impl KinematicsTask for RegularizationTask {
         let mut a = DMatrix::zeros(n - 6, n);
         for i in 0..(n - 6) {
             a[(i, 6 + i)] = w;
+        }
+        // Per-joint overrides (rows/cols offset by the floating base's 6 DoFs).
+        for (joint, weight) in &self.joint_weights {
+            let off = robot.joint_v_offset(joint)?;
+            let size = robot.joint_v_size(joint)?;
+            for i in 0..size {
+                if off + i >= 6 {
+                    a[(off + i - 6, off + i)] = weight.sqrt();
+                }
+            }
         }
         self.base.a = a;
         self.base.b = DVector::zeros(n - 6);
