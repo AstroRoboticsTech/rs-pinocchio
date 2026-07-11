@@ -223,6 +223,17 @@ impl RobotWrapper {
         self.inner.total_mass()
     }
 
+    /// Applies a configuration delta on the manifold: `q ← integrate(q, dq)`
+    /// (`dq` has length `nv`). Used to apply an IK/ID velocity step.
+    pub fn integrate_configuration(&mut self, dq: &DVector<f64>) -> Result<()> {
+        let mut out = DVector::zeros(self.nq);
+        self.inner
+            .integrate(self.state.q.as_slice(), dq.as_slice(), out.as_mut_slice())
+            .map_err(|e| Error::Cxx(e.what().to_string()))?;
+        self.state.q = out;
+        Ok(())
+    }
+
     /// Integrates the state over `dt`: `qd += dt·qdd`, then `q ← integrate(q, dt·qd)`.
     pub fn integrate(&mut self, dt: f64) -> Result<()> {
         self.state.qd += dt * &self.state.qdd;

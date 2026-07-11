@@ -27,6 +27,10 @@ pub enum Error {
     /// A C++ exception surfaced from the Pinocchio shim.
     #[error("pinocchio error: {0}")]
     Cxx(String),
+
+    /// A task-space (IK/ID) solver failed (e.g. the underlying QP was infeasible).
+    #[error("solver error: {0}")]
+    Solver(String),
 }
 
 /// Convenience result alias.

@@ -16,6 +16,8 @@
 //! feature.
 
 #[cfg(feature = "ffi")]
+pub mod kinematics;
+#[cfg(feature = "ffi")]
 pub mod model;
 pub mod problem;
 pub mod tools;
