@@ -104,3 +104,94 @@ impl Contact for PointContact {
         }
     }
 }
+
+/// A 6-DoF planar / fixed contact (force + moment), expressed in the frame's
+/// local frame (PlaCo `Contact6D`). Wrench layout: `[Fx, Fy, Fz, Mx, My, Mz]`.
+pub struct Contact6D {
+    /// Contact frame index.
+    pub frame_index: usize,
+    /// Whether the contact is unilateral (planar ZMP + friction limits).
+    pub unilateral: bool,
+    /// Friction coefficient.
+    pub mu: f64,
+    /// Contact length (x) for the ZMP box [m].
+    pub length: f64,
+    /// Contact width (y) for the ZMP box [m].
+    pub width: f64,
+    /// Soft weight to minimize forces.
+    pub weight_forces: f64,
+    /// Soft weight to minimize moments.
+    pub weight_moments: f64,
+    /// Whether this contact is active.
+    pub active: bool,
+    j: DMatrix<f64>,
+}
+
+impl Contact6D {
+    pub(crate) fn new(frame_index: usize, unilateral: bool) -> Self {
+        Self {
+            frame_index,
+            unilateral,
+            mu: 1.0,
+            length: 0.0,
+            width: 0.0,
+            weight_forces: 0.0,
+            weight_moments: 0.0,
+            active: true,
+            j: DMatrix::zeros(0, 0),
+        }
+    }
+}
+
+impl Contact for Contact6D {
+    fn active(&self) -> bool {
+        self.active
+    }
+    fn size(&self) -> usize {
+        6
+    }
+    fn jacobian(&self) -> &DMatrix<f64> {
+        &self.j
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+        // Position rows + orientation rows of the LOCAL frame Jacobian.
+        self.j = robot.frame_jacobian(self.frame_index, ReferenceFrame::Local)?;
+        Ok(())
+    }
+    fn add_constraints(&self, problem: &mut Problem, f: Variable) {
+        // f = [Fx, Fy, Fz, Mx, My, Mz] in the local frame.
+        let e = f.expr();
+        let (fx, fy, fz) = (e.slice(0, 1), e.slice(1, 1), e.slice(2, 1));
+        let (mx, my) = (e.slice(3, 1), e.slice(4, 1));
+
+        if self.unilateral {
+            problem.add_constraint(fz.geq_scalar(0.0));
+            // ZMP in the contact box: |My| <= l/2 Fz, |Mx| <= w/2 Fz.
+            let l = self.length / 2.0;
+            let w = self.width / 2.0;
+            problem.add_constraint(my.leq(&fz.scale(l)));
+            problem.add_constraint(my.geq(&fz.scale(-l)));
+            problem.add_constraint(mx.leq(&fz.scale(w)));
+            problem.add_constraint(mx.geq(&fz.scale(-w)));
+            // Friction: |Fx|, |Fy| <= mu Fz.
+            problem.add_constraint(fx.leq(&fz.scale(self.mu)));
+            problem.add_constraint(fx.geq(&fz.scale(-self.mu)));
+            problem.add_constraint(fy.leq(&fz.scale(self.mu)));
+            problem.add_constraint(fy.geq(&fz.scale(-self.mu)));
+        }
+
+        if self.weight_forces > 0.0 {
+            problem
+                .add_constraint(e.slice(0, 3).equal_vector(nalgebra::DVector::zeros(3)))
+                .configure(ConstraintPriority::Soft, self.weight_forces);
+        }
+        if self.weight_moments > 0.0 {
+            problem
+                .add_constraint(e.slice(3, 3).equal_vector(nalgebra::DVector::zeros(3)))
+                .configure(ConstraintPriority::Soft, self.weight_moments);
+        }
+    }
+}

@@ -7,11 +7,13 @@
 //! [`crate::placo::model::RobotWrapper`]).
 
 mod contacts;
+mod more_tasks;
 mod solver;
 mod task;
 mod tasks;
 
-pub use contacts::{Contact, PointContact};
-pub use solver::{ContactId, DynamicsResult, DynamicsSolver, TaskId};
+pub use contacts::{Contact, Contact6D, PointContact};
+pub use more_tasks::{CoMTask, OrientationTask, TargetTau, TorqueTask};
+pub use solver::{ContactId, DynamicsResult, DynamicsSolver, FrameTaskHandle, TaskId};
 pub use task::{DynamicsTask, TaskBase};
 pub use tasks::{JointsTask, PositionTask};

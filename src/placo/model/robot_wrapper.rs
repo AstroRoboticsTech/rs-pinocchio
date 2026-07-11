@@ -216,6 +216,20 @@ impl RobotWrapper {
         Ok(DMatrix::from_row_slice(3, self.nv, &out))
     }
 
+    /// The `3 × nv` CoM Jacobian time variation.
+    pub fn com_jacobian_time_variation(&mut self) -> Result<DMatrix<f64>> {
+        let mut out = vec![0.0; 3 * self.nv];
+        self.inner
+            .pin_mut()
+            .com_jacobian_time_variation(
+                self.state.q.as_slice(),
+                self.state.qd.as_slice(),
+                out.as_mut_slice(),
+            )
+            .map_err(|e| Error::Cxx(e.what().to_string()))?;
+        Ok(DMatrix::from_row_slice(3, self.nv, &out))
+    }
+
     /// The `6 × nv` centroidal map `Ag`.
     pub fn centroidal_map(&mut self) -> Result<DMatrix<f64>> {
         let mut out = vec![0.0; 6 * self.nv];

@@ -76,6 +76,8 @@ public:
 
   void center_of_mass(rust::Slice<const double> q, rust::Slice<double> out);
   void com_jacobian(rust::Slice<const double> q, rust::Slice<double> out);
+  void com_jacobian_time_variation(rust::Slice<const double> q, rust::Slice<const double> v,
+                                   rust::Slice<double> out);
   void centroidal_map(rust::Slice<const double> q, rust::Slice<double> out);
 
   void mass_matrix(rust::Slice<const double> q, rust::Slice<double> out);

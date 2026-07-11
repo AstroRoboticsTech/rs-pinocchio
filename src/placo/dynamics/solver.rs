@@ -5,9 +5,10 @@
 //! (`tau[0..6] = 0`) and the actuated torques minimized. Acceleration tasks
 //! constrain `qdd`; torque tasks constrain `tau`.
 
-use nalgebra::DVector;
+use nalgebra::{DVector, Matrix3};
 
-use super::contacts::{Contact, PointContact};
+use super::contacts::{Contact, Contact6D, PointContact};
+use super::more_tasks::{CoMTask, OrientationTask, TorqueTask};
 use super::task::DynamicsTask;
 use super::tasks::{JointsTask, PositionTask};
 use crate::error::{Error, Result};
@@ -19,6 +20,15 @@ use crate::placo::tools::Priority;
 pub type TaskId = usize;
 /// Handle to a contact.
 pub type ContactId = usize;
+
+/// Handles to the position + orientation sub-tasks of a dynamics frame task.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameTaskHandle {
+    /// The position sub-task.
+    pub position: TaskId,
+    /// The orientation sub-task.
+    pub orientation: TaskId,
+}
 
 /// The result of a dynamics solve.
 #[derive(Clone, Debug)]
@@ -81,6 +91,40 @@ impl DynamicsSolver {
         self.push_task(Box::new(PositionTask::new(frame_index, target_world)))
     }
 
+    /// Adds an orientation task on `frame_index`.
+    pub fn add_orientation_task(
+        &mut self,
+        frame_index: usize,
+        r_world_frame: Matrix3<f64>,
+    ) -> TaskId {
+        self.push_task(Box::new(OrientationTask::new(frame_index, r_world_frame)))
+    }
+
+    /// Adds a frame (position + orientation) task on `frame_index`.
+    pub fn add_frame_task(
+        &mut self,
+        frame_index: usize,
+        t_world_frame: nalgebra::Isometry3<f64>,
+    ) -> FrameTaskHandle {
+        let position = self.add_position_task(frame_index, t_world_frame.translation.vector);
+        let r = t_world_frame.rotation.to_rotation_matrix().into_inner();
+        let orientation = self.add_orientation_task(frame_index, r);
+        FrameTaskHandle {
+            position,
+            orientation,
+        }
+    }
+
+    /// Adds a CoM task.
+    pub fn add_com_task(&mut self, target_world: nalgebra::Vector3<f64>) -> TaskId {
+        self.push_task(Box::new(CoMTask::new(target_world)))
+    }
+
+    /// Adds an (empty) torque task.
+    pub fn add_torque_task(&mut self) -> TaskId {
+        self.push_task(Box::new(TorqueTask::new()))
+    }
+
     /// Adds an (empty) joints task.
     pub fn add_joints_task(&mut self) -> TaskId {
         self.push_task(Box::new(JointsTask::new()))
@@ -111,6 +155,21 @@ impl DynamicsSolver {
     pub fn add_unilateral_point_contact(&mut self, frame_index: usize) -> ContactId {
         self.contacts
             .push(Box::new(PointContact::new(frame_index, true)));
+        self.contacts.len() - 1
+    }
+
+    /// Adds a bilateral (fixed) 6-DoF contact on `frame_index`.
+    pub fn add_fixed_contact(&mut self, frame_index: usize) -> ContactId {
+        self.contacts
+            .push(Box::new(Contact6D::new(frame_index, false)));
+        self.contacts.len() - 1
+    }
+
+    /// Adds a unilateral planar 6-DoF contact (set its `length`/`width` via
+    /// [`DynamicsSolver::contact_mut`]).
+    pub fn add_planar_contact(&mut self, frame_index: usize) -> ContactId {
+        self.contacts
+            .push(Box::new(Contact6D::new(frame_index, true)));
         self.contacts.len() - 1
     }
 

@@ -274,6 +274,18 @@ void PinocchioModel::com_jacobian(rust::Slice<const double> q, rust::Slice<doubl
   fill_row_major(out, pinocchio::jacobianCenterOfMass(impl_->model, impl_->data, qv));
 }
 
+void PinocchioModel::com_jacobian_time_variation(rust::Slice<const double> q,
+                                                 rust::Slice<const double> v,
+                                                 rust::Slice<double> out) {
+  auto qv = map_q(impl_->model, q);
+  auto vv = map_v(impl_->model, v);
+  // dJ_com = (dAg / m).topRows(3); see stack-of-tasks/pinocchio#1297.
+  Eigen::MatrixXd dag =
+      pinocchio::computeCentroidalMapTimeVariation(impl_->model, impl_->data, qv, vv);
+  double mass = total_mass();
+  fill_row_major(out, (dag.topRows(3) / mass).eval());
+}
+
 void PinocchioModel::centroidal_map(rust::Slice<const double> q, rust::Slice<double> out) {
   auto qv = map_q(impl_->model, q);
   fill_row_major(out, pinocchio::computeCentroidalMap(impl_->model, impl_->data, qv));

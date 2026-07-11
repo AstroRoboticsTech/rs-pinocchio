@@ -82,6 +82,13 @@ pub(crate) mod bridge {
             -> Result<()>;
         /// CoM Jacobian for `q` into `out` (`3 * nv`, row-major).
         fn com_jacobian(self: Pin<&mut PinocchioModel>, q: &[f64], out: &mut [f64]) -> Result<()>;
+        /// CoM Jacobian time variation for `(q, v)` into `out` (`3 * nv`, row-major).
+        fn com_jacobian_time_variation(
+            self: Pin<&mut PinocchioModel>,
+            q: &[f64],
+            v: &[f64],
+            out: &mut [f64],
+        ) -> Result<()>;
         /// Centroidal map `Ag` for `q` into `out` (`6 * nv`, row-major).
         fn centroidal_map(self: Pin<&mut PinocchioModel>, q: &[f64], out: &mut [f64])
             -> Result<()>;
