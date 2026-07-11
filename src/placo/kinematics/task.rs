@@ -49,8 +49,9 @@ pub trait KinematicsTask: Any {
     fn base(&self) -> &TaskBase;
     /// Mutable shared task state.
     fn base_mut(&mut self) -> &mut TaskBase;
-    /// Rebuilds `A` and `b` from the current robot state and target.
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()>;
+    /// Rebuilds `A` and `b` from the current robot state and target. `dt` is the
+    /// solver timestep (0 if unset); most tasks ignore it.
+    fn update(&mut self, robot: &mut RobotWrapper, dt: f64) -> Result<()>;
     /// Task type name (e.g. `"position"`).
     fn type_name(&self) -> &'static str;
     /// Downcast hook for typed reconfiguration.

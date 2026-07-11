@@ -47,7 +47,7 @@ impl KinematicsTask for PositionTask {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+    fn update(&mut self, robot: &mut RobotWrapper, _dt: f64) -> Result<()> {
         let t_world_frame = robot.t_world_frame(self.frame_index)?;
         let r = t_world_frame.rotation.to_rotation_matrix().into_inner();
         self.base.mask.r_local_world = r.transpose();
@@ -92,7 +92,7 @@ impl KinematicsTask for OrientationTask {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+    fn update(&mut self, robot: &mut RobotWrapper, _dt: f64) -> Result<()> {
         let t_world_frame = robot.t_world_frame(self.frame_index)?;
         let r_current = t_world_frame.rotation.to_rotation_matrix().into_inner();
         // error = log3(R_target · R_current⁻¹)
@@ -136,7 +136,7 @@ impl KinematicsTask for CoMTask {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+    fn update(&mut self, robot: &mut RobotWrapper, _dt: f64) -> Result<()> {
         let jac = robot.com_jacobian()?;
         let error = self.target_world - robot.com_world()?;
         self.base.a = self.base.mask.apply(&jac);
@@ -184,7 +184,7 @@ impl KinematicsTask for JointsTask {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+    fn update(&mut self, robot: &mut RobotWrapper, _dt: f64) -> Result<()> {
         let n = robot.nv();
         let mut a = DMatrix::zeros(self.joints.len(), n);
         let mut b = DVector::zeros(self.joints.len());
@@ -229,7 +229,7 @@ impl KinematicsTask for RegularizationTask {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    fn update(&mut self, robot: &mut RobotWrapper) -> Result<()> {
+    fn update(&mut self, robot: &mut RobotWrapper, _dt: f64) -> Result<()> {
         let n = robot.nv();
         // sqrt so the weight squares back out in the QP objective.
         let w = self.magnitude.sqrt();

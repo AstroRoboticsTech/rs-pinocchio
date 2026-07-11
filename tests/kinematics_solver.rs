@@ -84,6 +84,37 @@ fn ik_reaches_a_reachable_position_target() {
 
 #[test]
 #[ignore = "requires a linkable Pinocchio install"]
+fn ik_relative_position_reaches_target() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    let base = robot.frame_index("base_link").expect("base frame");
+    let tool = robot.frame_index("tool").expect("tool frame");
+
+    // Reachable relative target from FK of a known configuration.
+    robot.set_joint("joint1", -0.3).unwrap();
+    robot.set_joint("joint2", 0.5).unwrap();
+    robot.update_kinematics().unwrap();
+    let target = robot.t_a_b(base, tool).unwrap().translation.vector;
+
+    robot.reset();
+    let mut solver = KinematicsSolver::new(&robot);
+    solver.mask_fbase(true);
+    solver.add_relative_position_task(base, tool, target);
+    solver.add_regularization_task(1e-6);
+
+    for _ in 0..200 {
+        solver.solve(&mut robot, true).expect("solve");
+    }
+
+    robot.update_kinematics().unwrap();
+    let reached = robot.t_a_b(base, tool).unwrap().translation.vector;
+    let err = (reached - target).norm();
+    assert!(err < 1e-4, "relative IK did not converge: error {err}");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
 fn masked_fbase_keeps_base_fixed() {
     let path = write_fixture();
     let mut robot = RobotWrapper::from_urdf(&path).expect("load");

@@ -8,7 +8,9 @@
 use std::path::Path;
 
 use cxx::UniquePtr;
-use nalgebra::{DMatrix, DVector, Isometry3, Quaternion, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{
+    DMatrix, DVector, Isometry3, Matrix3, Quaternion, Translation3, UnitQuaternion, Vector3,
+};
 
 use crate::error::{Error, Result};
 use crate::ffi::bridge as ffi;
@@ -152,6 +154,22 @@ impl RobotWrapper {
             .frame_jacobian_time_variation(id as i64, reference as u8, out.as_mut_slice())
             .map_err(|e| Error::Cxx(e.what().to_string()))?;
         Ok(DMatrix::from_row_slice(6, self.nv, &out))
+    }
+
+    /// The `3 × nv` Jacobian of frame `b`'s position expressed in frame `a`.
+    ///
+    /// Needs a prior [`update_kinematics`].
+    pub fn relative_position_jacobian(&self, a: usize, b: usize) -> Result<DMatrix<f64>> {
+        let t_world_a = self.t_world_frame(a)?;
+        let t_a_b = t_world_a.inverse() * self.t_world_frame(b)?;
+        let r_world_a = dmat3(&t_world_a.rotation.to_rotation_matrix().into_inner());
+        let ja = self.frame_jacobian(a, ReferenceFrame::LocalWorldAligned)?;
+        let jb = self.frame_jacobian(b, ReferenceFrame::LocalWorldAligned)?;
+        let ja_pos = ja.rows(0, 3).into_owned();
+        let ja_rot = ja.rows(3, 3).into_owned();
+        let jb_pos = jb.rows(0, 3).into_owned();
+        let rt = r_world_a.transpose();
+        Ok(&rt * (jb_pos - ja_pos) + skew(&t_a_b.translation.vector) * &rt * ja_rot)
     }
 
     /// The `3 × nv` CoM Jacobian (in the world frame).
@@ -415,6 +433,15 @@ impl RobotWrapper {
             .pin_mut()
             .set_gravity(gravity.x, gravity.y, gravity.z);
     }
+}
+
+fn dmat3(m: &Matrix3<f64>) -> DMatrix<f64> {
+    DMatrix::from_column_slice(3, 3, m.as_slice())
+}
+
+/// `3 × 3` skew-symmetric matrix of `v` (so `skew(v)·w = v × w`), as a `DMatrix`.
+fn skew(v: &Vector3<f64>) -> DMatrix<f64> {
+    DMatrix::from_row_slice(3, 3, &[0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0])
 }
 
 fn frame_placement_to_isometry(p: &ffi::FramePlacement) -> Isometry3<f64> {

@@ -4,6 +4,10 @@ use std::collections::BTreeSet;
 
 use nalgebra::{DVector, Isometry3, Matrix3, Vector3};
 
+use super::relative_tasks::{
+    AxisAlignTask, CentroidalMomentumTask, DistanceTask, RelativeOrientationTask,
+    RelativePositionTask,
+};
 use super::task::KinematicsTask;
 use super::tasks::{CoMTask, JointsTask, OrientationTask, PositionTask, RegularizationTask};
 use crate::error::Result;
@@ -88,6 +92,71 @@ impl KinematicsSolver {
         }
     }
 
+    /// Adds a relative-position task: position of `frame_b` in `frame_a` → `target`.
+    pub fn add_relative_position_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        target: Vector3<f64>,
+    ) -> TaskId {
+        self.push(Box::new(RelativePositionTask::new(
+            frame_a, frame_b, target,
+        )))
+    }
+
+    /// Adds a relative-orientation task: `R_a_b` → `r_a_b`.
+    pub fn add_relative_orientation_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        r_a_b: Matrix3<f64>,
+    ) -> TaskId {
+        self.push(Box::new(RelativeOrientationTask::new(
+            frame_a, frame_b, r_a_b,
+        )))
+    }
+
+    /// Adds a relative-frame task (relative position + orientation).
+    pub fn add_relative_frame_task(
+        &mut self,
+        frame_a: usize,
+        frame_b: usize,
+        t_a_b: Isometry3<f64>,
+    ) -> FrameTaskHandle {
+        let position = self.add_relative_position_task(frame_a, frame_b, t_a_b.translation.vector);
+        let r = t_a_b.rotation.to_rotation_matrix().into_inner();
+        let orientation = self.add_relative_orientation_task(frame_a, frame_b, r);
+        FrameTaskHandle {
+            position,
+            orientation,
+        }
+    }
+
+    /// Adds an axis-align task: aligns `axis_frame` (in the frame) with
+    /// `target_axis_world`.
+    pub fn add_axis_align_task(
+        &mut self,
+        frame_index: usize,
+        axis_frame: Vector3<f64>,
+        target_axis_world: Vector3<f64>,
+    ) -> TaskId {
+        self.push(Box::new(AxisAlignTask::new(
+            frame_index,
+            axis_frame,
+            target_axis_world,
+        )))
+    }
+
+    /// Adds a distance task: distance between `frame_a` and `frame_b` → `distance`.
+    pub fn add_distance_task(&mut self, frame_a: usize, frame_b: usize, distance: f64) -> TaskId {
+        self.push(Box::new(DistanceTask::new(frame_a, frame_b, distance)))
+    }
+
+    /// Adds a centroidal-momentum task (angular). Requires [`KinematicsSolver::dt`].
+    pub fn add_centroidal_momentum_task(&mut self, l_world: Vector3<f64>) -> TaskId {
+        self.push(Box::new(CentroidalMomentumTask::new(l_world)))
+    }
+
     /// Adds a CoM task targeting `target_world`.
     pub fn add_com_task(&mut self, target_world: Vector3<f64>) -> TaskId {
         self.push(Box::new(CoMTask::new(target_world)))
@@ -159,7 +228,7 @@ impl KinematicsSolver {
         let qd = problem.add_variable(n);
 
         for task in &mut self.tasks {
-            task.update(robot)?;
+            task.update(robot, self.dt)?;
             if task.a().nrows() == 0 {
                 continue;
             }
