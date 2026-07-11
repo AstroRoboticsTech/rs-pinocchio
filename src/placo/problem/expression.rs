@@ -88,6 +88,28 @@ impl Expression {
         }
     }
 
+    /// Multiplies two expressions, where one is scalar (a single row) and the
+    /// other constant (no variables): broadcasts the scalar affine expression by
+    /// the constant vector (PlaCo's `Expression::operator*(Expression)`).
+    ///
+    /// # Panics
+    /// If neither operand is a scalar-times-constant pairing.
+    pub fn mul_expr(&self, other: &Expression) -> Expression {
+        if self.is_scalar() && other.is_constant() {
+            let mut a = DMatrix::zeros(other.rows(), self.cols());
+            let mut b = DVector::zeros(other.rows());
+            for k in 0..other.rows() {
+                a.row_mut(k).copy_from(&(self.a.row(0) * other.b[k]));
+                b[k] = self.b[0] * other.b[k];
+            }
+            Expression { a, b }
+        } else if other.is_scalar() && self.is_constant() {
+            other.mul_expr(self)
+        } else {
+            panic!("mul_expr: one expression must be scalar and the other constant");
+        }
+    }
+
     /// Reduces a multi-row expression to the sum of its rows (one row out).
     pub fn sum(&self) -> Expression {
         let mut a = DMatrix::zeros(1, self.cols());
@@ -103,12 +125,15 @@ impl Expression {
     }
 
     /// Reduces a multi-row expression to the mean of its rows.
+    ///
+    /// Mirrors PlaCo, which divides the summed row by the number of columns
+    /// (decision variables), not the number of rows.
     pub fn mean(&self) -> Expression {
-        let rows = self.rows() as f64;
+        let cols = self.cols() as f64;
         let s = self.sum();
         Expression {
-            a: s.a / rows,
-            b: s.b / rows,
+            a: s.a / cols,
+            b: s.b / cols,
         }
     }
 
@@ -297,6 +322,38 @@ mod tests {
             a,
             b: DVector::zeros(size),
         }
+    }
+
+    #[test]
+    fn mean_divides_by_cols() {
+        // Two rows over three variables: mean divides the summed row by cols (3).
+        let e = Expression {
+            a: DMatrix::from_row_slice(2, 3, &[1.0, 2.0, 3.0, 3.0, 4.0, 5.0]),
+            b: DVector::from_vec(vec![6.0, 12.0]),
+        };
+        let m = e.mean();
+        assert_eq!(m.rows(), 1);
+        assert!((m.a[(0, 0)] - 4.0 / 3.0).abs() < 1e-12);
+        assert!((m.b[0] - 18.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn mul_expr_broadcasts_scalar_by_constant() {
+        // scalar (1 row, 2 vars) times constant vector [10, 20].
+        let scalar = Expression {
+            a: DMatrix::from_row_slice(1, 2, &[1.0, 2.0]),
+            b: DVector::from_element(1, 3.0),
+        };
+        let constant = Expression::from_vector(DVector::from_vec(vec![10.0, 20.0]));
+        let p = scalar.mul_expr(&constant);
+        assert_eq!(p.rows(), 2);
+        assert_eq!(p.cols(), 2);
+        assert!((p.a[(0, 0)] - 10.0).abs() < 1e-12 && (p.a[(0, 1)] - 20.0).abs() < 1e-12);
+        assert!((p.a[(1, 0)] - 20.0).abs() < 1e-12 && (p.a[(1, 1)] - 40.0).abs() < 1e-12);
+        assert!((p.b[0] - 30.0).abs() < 1e-12 && (p.b[1] - 60.0).abs() < 1e-12);
+        // Commuted form (constant * scalar) yields the same result.
+        let q = constant.mul_expr(&scalar);
+        assert_eq!(p, q);
     }
 
     #[test]
