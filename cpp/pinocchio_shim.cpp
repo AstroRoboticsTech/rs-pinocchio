@@ -314,6 +314,23 @@ double PinocchioModel::total_mass() const {
   return mass;
 }
 
+FramePlacement PinocchioModel::root_joint_placement() const {
+  // jointPlacements[0] is the universe; [1] is the (free-flyer) root joint.
+  const pinocchio::SE3 &M = (impl_->model.jointPlacements.size() > 1)
+                                ? impl_->model.jointPlacements[1]
+                                : pinocchio::SE3::Identity();
+  const Eigen::Quaterniond quat(M.rotation());
+  FramePlacement fp{};
+  fp.translation[0] = M.translation().x();
+  fp.translation[1] = M.translation().y();
+  fp.translation[2] = M.translation().z();
+  fp.rotation[0] = quat.x();
+  fp.rotation[1] = quat.y();
+  fp.rotation[2] = quat.z();
+  fp.rotation[3] = quat.w();
+  return fp;
+}
+
 bool PinocchioModel::exist_joint(rust::Str name) const {
   return impl_->model.existJointName(std::string(name));
 }

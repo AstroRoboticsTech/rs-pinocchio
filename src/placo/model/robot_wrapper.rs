@@ -134,6 +134,40 @@ impl RobotWrapper {
         Ok(ta.inverse() * tb)
     }
 
+    /// World placement of the floating base (root) frame.
+    pub fn t_world_fbase(&self) -> Isometry3<f64> {
+        let q = &self.state.q;
+        let trans = Translation3::new(q[0], q[1], q[2]);
+        // Free-flyer stores the quaternion as (qx, qy, qz, qw).
+        let quat = UnitQuaternion::from_quaternion(Quaternion::new(q[6], q[3], q[4], q[5]));
+        let se3_q = Isometry3::from_parts(trans, quat);
+        frame_placement_to_isometry(&self.inner.root_joint_placement()) * se3_q
+    }
+
+    /// Sets the floating base so its world placement is `t`.
+    pub fn set_t_world_fbase(&mut self, t: Isometry3<f64>) {
+        let root = frame_placement_to_isometry(&self.inner.root_joint_placement());
+        let tt = root.inverse() * t;
+        self.state.q[0] = tt.translation.x;
+        self.state.q[1] = tt.translation.y;
+        self.state.q[2] = tt.translation.z;
+        let q = tt.rotation.quaternion();
+        self.state.q[3] = q.i;
+        self.state.q[4] = q.j;
+        self.state.q[5] = q.k;
+        self.state.q[6] = q.w;
+    }
+
+    /// Moves the floating base so that frame `frame` has world placement
+    /// `t_target`. Requires a prior [`update_kinematics`].
+    pub fn set_t_world_frame(&mut self, frame: usize, t_target: Isometry3<f64>) -> Result<()> {
+        let t_world_fbase = self.t_world_fbase();
+        let t_world_frame = self.t_world_frame(frame)?;
+        let t_frame_fbase = t_world_frame.inverse() * t_world_fbase;
+        self.set_t_world_fbase(t_target * t_frame_fbase);
+        Ok(())
+    }
+
     /// The `6 × nv` frame Jacobian in `reference` (needs [`update_kinematics`]).
     pub fn frame_jacobian(&self, id: usize, reference: ReferenceFrame) -> Result<DMatrix<f64>> {
         let mut out = vec![0.0; 6 * self.nv];

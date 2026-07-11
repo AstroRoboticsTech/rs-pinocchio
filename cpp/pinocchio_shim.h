@@ -85,6 +85,8 @@ public:
 
   double total_mass() const;
 
+  FramePlacement root_joint_placement() const;
+
   bool exist_joint(rust::Str name) const;
   std::int64_t joint_q_offset(rust::Str name) const;
   std::int64_t joint_v_offset(rust::Str name) const;

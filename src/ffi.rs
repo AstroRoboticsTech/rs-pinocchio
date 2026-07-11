@@ -106,6 +106,10 @@ pub(crate) mod bridge {
         /// Total mass of the model.
         fn total_mass(self: &PinocchioModel) -> f64;
 
+        /// Placement of the root (free-flyer) joint, `model.jointPlacements[1]`
+        /// (usually identity). Used to map the free-flyer config to the base pose.
+        fn root_joint_placement(self: &PinocchioModel) -> FramePlacement;
+
         // Joint metadata (by name). Offsets are `-1` when the joint is absent.
         /// Whether a joint with `name` exists.
         fn exist_joint(self: &PinocchioModel, name: &str) -> bool;

@@ -5,6 +5,8 @@
 //! `HumanoidRobot`) will additionally require the `ffi` feature.
 
 mod footsteps;
+#[cfg(feature = "ffi")]
+mod humanoid_robot;
 mod lipm;
 mod parameters;
 mod side;
@@ -14,6 +16,8 @@ pub use footsteps::{
     make_supports, Footstep, FootstepsPlanner, FootstepsPlannerNaive, FootstepsPlannerRepetitive,
     Support,
 };
+#[cfg(feature = "ffi")]
+pub use humanoid_robot::HumanoidRobot;
 pub use lipm::{Lipm, LipmTrajectory};
 pub use parameters::{FootstepClipping, HumanoidParameters};
 pub use side::Side;
