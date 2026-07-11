@@ -20,7 +20,7 @@ use super::tasks::{CoMTask, JointsTask, OrientationTask, PositionTask, Regulariz
 use super::wheel_task::WheelTask;
 use crate::error::Result;
 use crate::placo::model::RobotWrapper;
-use crate::placo::problem::{Constraint, ConstraintPriority, Expression, Problem};
+use crate::placo::problem::{Constraint, ConstraintPriority, Expression, Problem, Variable};
 use crate::placo::tools::Priority;
 
 /// Handle to a task added to the solver.
@@ -48,12 +48,14 @@ pub struct KinematicsSolver {
     masked_dof: BTreeSet<usize>,
     masked_fbase: bool,
     n: usize,
-    /// Enforce joint position limits (needs URDF limits). Off by default.
+    /// Enforce joint position limits (needs URDF limits). On by default, matching PlaCo.
     pub joint_limits: bool,
     /// Enforce joint velocity limits (needs [`KinematicsSolver::dt`]). Off by default.
     pub velocity_limits: bool,
     /// Integration timestep used by the velocity limits (0 disables the check).
     pub dt: f64,
+    /// Scale factor found for `Scaled`-priority tasks at the last solve (1 = fully met).
+    scale: f64,
 }
 
 impl KinematicsSolver {
@@ -65,10 +67,17 @@ impl KinematicsSolver {
             masked_dof: BTreeSet::new(),
             masked_fbase: false,
             n: robot.nv(),
-            joint_limits: false,
+            joint_limits: true,
             velocity_limits: false,
             dt: 0.0,
+            scale: 1.0,
         }
+    }
+
+    /// Scale found for `Scaled`-priority tasks at the last [`solve`](Self::solve)
+    /// (1 means they were fully satisfied).
+    pub fn scale(&self) -> f64 {
+        self.scale
     }
 
     fn push(&mut self, task: Box<dyn KinematicsTask>) -> TaskId {
@@ -365,24 +374,52 @@ impl KinematicsSolver {
         let mut problem = Problem::new();
         let qd = problem.add_variable(n);
 
+        let mut scale_variable: Option<Variable> = None;
         for task in &mut self.tasks {
             task.update(robot, self.dt)?;
-            if task.a().nrows() == 0 {
+            let rows = task.a().nrows();
+            if rows == 0 {
                 continue;
             }
-            let expr = Expression {
-                a: task.a().clone(),
-                b: -task.b(),
-            };
-            let mut constraint = Constraint::equality(expr);
             match task.priority() {
-                Priority::Soft => {
-                    constraint.configure(ConstraintPriority::Soft, task.weight());
+                Priority::Scaled => {
+                    // A scale factor s in [0, 1], softly pushed to 1, shared by all
+                    // scaled tasks; each becomes the hard equality A·qd = b·s.
+                    let s = *scale_variable.get_or_insert_with(|| {
+                        let v = problem.add_variable(1);
+                        problem.add_constraint(v.expr().geq_scalar(0.0));
+                        problem.add_constraint(v.expr().leq_scalar(1.0));
+                        problem
+                            .add_constraint(v.expr().equal_scalar(1.0))
+                            .configure(ConstraintPriority::Soft, 1.0);
+                        v
+                    });
+                    let a_qd = Expression {
+                        a: task.a().clone(),
+                        b: DVector::zeros(rows),
+                    };
+                    let b_s = s
+                        .expr()
+                        .mul_expr(&Expression::from_vector(task.b().clone()));
+                    problem.add_constraint(a_qd.subtract(&b_s).equal_vector(DVector::zeros(rows)));
                 }
-                // Hard and (for now) Scaled are enforced as equalities.
-                Priority::Hard | Priority::Scaled => {}
+                Priority::Soft => {
+                    let expr = Expression {
+                        a: task.a().clone(),
+                        b: -task.b(),
+                    };
+                    problem
+                        .add_constraint(Constraint::equality(expr))
+                        .configure(ConstraintPriority::Soft, task.weight());
+                }
+                Priority::Hard => {
+                    let expr = Expression {
+                        a: task.a().clone(),
+                        b: -task.b(),
+                    };
+                    problem.add_constraint(Constraint::equality(expr));
+                }
             }
-            problem.add_constraint(constraint);
         }
 
         for &joint in &self.masked_dof {
@@ -402,6 +439,10 @@ impl KinematicsSolver {
             .solve()
             .map_err(|e| crate::error::Error::Solver(e.to_string()))?;
         let qd_sol = qd.value(&problem);
+        self.scale = match scale_variable {
+            Some(s) => s.value(&problem)[0],
+            None => 1.0,
+        };
 
         if apply {
             robot.integrate_configuration(&qd_sol)?;
@@ -419,10 +460,15 @@ impl KinematicsSolver {
         let count = n - 6;
 
         if self.joint_limits {
+            // Mirror PlaCo's `q.bottomRows(N-6)`: the last `count` configuration
+            // rows (not row 7), so a non-simple joint (nq != nv, e.g. continuous)
+            // stays aligned with its velocity DoF.
             let (lower, upper) = robot.position_limits();
-            let q_bottom = robot.state.q.rows(7, count).into_owned();
-            let lower_bottom = lower.rows(7, count).into_owned();
-            let upper_bottom = upper.rows(7, count).into_owned();
+            let nq = robot.state.q.len();
+            let q_offset = nq - count;
+            let q_bottom = robot.state.q.rows(q_offset, count).into_owned();
+            let lower_bottom = lower.rows(q_offset, count).into_owned();
+            let upper_bottom = upper.rows(q_offset, count).into_owned();
             let e = qd.expr_slice(6, count).add_vector(&q_bottom);
             problem.add_constraint(e.leq_vector(upper_bottom));
             problem.add_constraint(e.geq_vector(lower_bottom));

@@ -87,6 +87,48 @@ fn ik_reaches_a_reachable_position_target() {
 
 #[test]
 #[ignore = "requires a linkable Pinocchio install"]
+fn scaled_task_degrades_gracefully() {
+    let path = write_fixture();
+    let mut robot = RobotWrapper::from_urdf(&path).expect("load");
+    let tool = robot.frame_index("tool").expect("tool frame");
+    robot.reset();
+    robot.update_kinematics().unwrap();
+
+    // A target off the two-joint arm's reachable velocity subspace.
+    let mut target = robot.t_world_frame(tool).unwrap().translation.vector;
+    target.x += 5.0;
+    target.y += 5.0;
+    target.z += 5.0;
+
+    // A hard, over-constrained, unreachable position task is infeasible.
+    let mut hard = KinematicsSolver::new(&robot);
+    hard.mask_fbase(true);
+    let hid = hard.add_position_task(tool, target);
+    hard.configure_task(hid, "reach", Priority::Hard, 1.0);
+    assert!(
+        hard.solve(&mut robot, false).is_err(),
+        "a hard unreachable task should be infeasible"
+    );
+
+    // The same task at Scaled priority keeps the QP feasible, with scale in [0, 1].
+    let mut scaled = KinematicsSolver::new(&robot);
+    scaled.mask_fbase(true);
+    let sid = scaled.add_position_task(tool, target);
+    scaled.configure_task(sid, "reach", Priority::Scaled, 1.0);
+    let qd = scaled
+        .solve(&mut robot, false)
+        .expect("a scaled task keeps the solve feasible");
+    assert!(qd.iter().all(|v| v.is_finite()));
+    assert!(
+        (0.0..=1.0 + 1e-9).contains(&scaled.scale()),
+        "scale out of range: {}",
+        scaled.scale()
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+#[ignore = "requires a linkable Pinocchio install"]
 fn ik_relative_position_reaches_target() {
     let path = write_fixture();
     let mut robot = RobotWrapper::from_urdf(&path).expect("load");
